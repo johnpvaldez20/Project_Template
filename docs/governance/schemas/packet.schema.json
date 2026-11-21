@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/governance/schemas/packet.schema.json",
+  "title": "WorkPacket",
+  "description": "A work packet plan. It is not a gate verdict. It must not contain issue_number or base_sha. Those values live on the issue or the pull request.",
+  "type": "object",
+  "required": [
+    "gate",
+    "packet_id",
+    "title",
+    "summary",
+    "status",
+    "blocked_on",
+    "gatekeeper_packet",
+    "regression_required",
+    "provenance",
+    "lane",
+    "subsystem_scope",
+    "data_contracts",
+    "verification_plan",
+    "abstraction_audit",
+    "contract_notes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "gate": { "type": "string", "const": "PACKET" },
+    "packet_id": { "$ref": "common.schema.json#/$defs/packet_id" },
+    "title": { "type": "string", "minLength": 8, "maxLength": 100 },
+    "summary": { "type": "string", "minLength": 40 },
+    "status": { "type": "string", "enum": ["READY", "BLOCKED"] },
+    "blocked_on": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^OQ-[A-Z0-9]+(-[A-Z0-9]+)*$" }
+    },
+    "gatekeeper_packet": { "type": "boolean" },
+    "regression_required": { "type": "boolean" },
+    "provenance": { "$ref": "common.schema.json#/$defs/provenance" },
+    "lane": { "$ref": "common.schema.json#/$defs/lane" },
+    "subsystem_scope": {
+      "type": "object",
+      "required": [
+        "allowed_files",
+        "forbidden_paths",
+        "components_touched",
+        "is_atomic",
+        "depends_on_packets"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "allowed_files": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/scope_path" }
+        },
+        "forbidden_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "components_touched": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/component_name" }
+        },
+        "is_atomic": { "type": "boolean" },
+        "depends_on_packets": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/packet_id" }
+        }
+      }
+    },
+    "data_contracts": {
+      "type": "object",
+      "required": [
+        "structures_defined_upfront",
+        "definitions",
+        "public_api_change",
+        "schema_diff_summary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "structures_defined_upfront": { "type": "boolean" },
+        "definitions": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/definition" }
+        },
+        "public_api_change": { "type": "string", "enum": ["NONE", "ADDITIVE", "BREAKING"] },
+        "migration": {
+          "type": "object",
+          "required": ["plan", "compat_window"],
+          "additionalProperties": false,
+          "properties": {
+            "plan": { "type": "string", "minLength": 50 },
+            "compat_window": { "type": "string", "minLength": 3 }
+          }
+        },
+        "schema_diff_summary": { "type": "string", "minLength": 10 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "public_api_change": { "const": "BREAKING" } } },
+          "then": { "required": ["migration"] }
+        }
+      ]
+    },
+    "verification_plan": {
+      "type": "object",
+      "required": ["commands", "regression_tests", "deterministic"],
+      "additionalProperties": false,
+      "properties": {
+        "commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "common.schema.json#/$defs/command" }
+        },
+        "regression_tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "kind", "asserts"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["UNIT", "PROPERTY", "GOLDEN", "INTEGRATION", "FUZZ", "BENCH", "SYSTEM"]
+              },
+              "asserts": { "type": "string", "minLength": 15 }
+            }
+          }
+        },
+        "deterministic": { "type": "boolean" }
+      }
+    },
+    "abstraction_audit": {
+      "type": "object",
+      "required": ["introduces_speculative_patterns", "flagged_anti_patterns"],
+      "additionalProperties": false,
+      "properties": {
+        "introduces_speculative_patterns": { "type": "boolean" },
+        "flagged_anti_patterns": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/anti_pattern" }
+        }
+      }
+    },
+    "contract_notes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "common.schema.json#/$defs/contract_note" }
+    },
+    "use_cases": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^UC-[0-9]{2,}$" }
+    },
+    "layer": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "state_machines": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" }
+    },
+    "architecture_change": { "type": "boolean" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["status"],
+        "properties": { "status": { "const": "READY" } }
+      },
+      "then": {
+        "required": ["use_cases", "layer"],
+        "properties": {
+          "use_cases": { "minItems": 1 },
+          "blocked_on": { "maxItems": 0 },
+          "regression_required": { "const": true },
+          "subsystem_scope": {
+            "properties": {
+              "is_atomic": { "const": true },
+              "components_touched": { "minItems": 1 }
+            }
+          },
+          "data_contracts": {
+            "properties": {
+              "structures_defined_upfront": { "const": true },
+              "definitions": { "minItems": 1 }
+            }
+          },
+          "verification_plan": {
+            "properties": {
+              "deterministic": { "const": true },
+              "regression_tests": { "minItems": 1 }
+            }
+          },
+          "abstraction_audit": {
+            "properties": {
+              "introduces_speculative_patterns": { "const": false },
+              "flagged_anti_patterns": { "maxItems": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["status"],
+        "properties": { "status": { "const": "BLOCKED" } }
+      },
+      "then": { "properties": { "blocked_on": { "minItems": 1 } } }
+    }
+  ]
+}

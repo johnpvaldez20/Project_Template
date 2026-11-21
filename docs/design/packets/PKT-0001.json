@@ -1,0 +1,105 @@
+{
+  "gate": "PACKET",
+  "packet_id": "PKT-0001",
+  "title": "Add the Item record and the save use case",
+  "summary": "Add the Item record for UC-01. A save returns an id. The state moves from draft to active to archived. This packet does not add a second entity.",
+  "status": "READY",
+  "blocked_on": [],
+  "gatekeeper_packet": false,
+  "regression_required": true,
+  "architecture_change": false,
+  "use_cases": ["UC-01"],
+  "layer": "domain",
+  "state_machines": ["Item"],
+  "provenance": {
+    "schema_version": "1.0.0",
+    "produced_at": "2026-11-21T00:00:00Z",
+    "author": {
+      "agent_id": "planner-example-01",
+      "role": "PLANNER",
+      "runtime": "CLOUD",
+      "host": {
+        "kind": "CURSOR_CLOUD",
+        "name": "worker-host",
+        "arch": "x86_64"
+      },
+      "model": {
+        "provider": "OTHER",
+        "name": "planner"
+      },
+      "tool": {
+        "name": "OTHER"
+      }
+    },
+    "worker": {
+      "agent_id": "planner-example-01",
+      "role": "PLANNER",
+      "runtime": "CLOUD",
+      "host": {
+        "kind": "CURSOR_CLOUD",
+        "name": "worker-host",
+        "arch": "x86_64"
+      },
+      "model": {
+        "provider": "OTHER",
+        "name": "planner"
+      },
+      "tool": {
+        "name": "OTHER"
+      }
+    }
+  },
+  "lane": {
+    "runtime": "CLOUD",
+    "reason": "The change is pure domain data and needs no local hardware.",
+    "requires": ["NONE"]
+  },
+  "subsystem_scope": {
+    "allowed_files": ["src/domain/item.md"],
+    "forbidden_paths": ["src/presentation/", "src/infrastructure/", "docs/design/ARCHITECTURE.md"],
+    "components_touched": ["domain-model"],
+    "is_atomic": true,
+    "depends_on_packets": []
+  },
+  "data_contracts": {
+    "structures_defined_upfront": true,
+    "definitions": [
+      {
+        "language": "TEXT",
+        "path": "src/domain/item.md",
+        "definition": "record Item { id: string, state: draft | active | archived }"
+      }
+    ],
+    "public_api_change": "NONE",
+    "schema_diff_summary": "Adds the Item record. No prior public contract exists."
+  },
+  "verification_plan": {
+    "commands": ["python3 -m unittest discover -s tools/gatecheck -v"],
+    "regression_tests": [
+      {
+        "name": "item_id_present_after_save",
+        "kind": "UNIT",
+        "asserts": "A saved item has an id."
+      },
+      {
+        "name": "item_draft_to_active",
+        "kind": "UNIT",
+        "asserts": "An item moves from draft to active and does not skip."
+      },
+      {
+        "name": "item_active_to_archived",
+        "kind": "UNIT",
+        "asserts": "An active item moves to archived and does not skip."
+      }
+    ],
+    "deterministic": true
+  },
+  "abstraction_audit": {
+    "introduces_speculative_patterns": false,
+    "flagged_anti_patterns": []
+  },
+  "contract_notes": [
+    "UC-01 constraint: a saved item has an id. Test: item_id_present_after_save.",
+    "Item transitions are draft to active, then active to archived. Do not skip a state."
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "gate": "PACKET",
+  "packet_id": "PKT-0043",
+  "title": "Add the Item record without one test",
+  "summary": "Add the Item record but omit one transition test. The catalog requires both tests.",
+  "status": "READY",
+  "blocked_on": [],
+  "gatekeeper_packet": false,
+  "regression_required": true,
+  "provenance": {
+    "schema_version": "1.0.0",
+    "produced_at": "2026-10-31T18:00:00Z",
+    "author": {
+      "agent_id": "overseer-linus-v1",
+      "role": "GATEKEEPER",
+      "runtime": "LOCAL",
+      "host": {
+        "kind": "OWNER_MACHINE",
+        "name": "worker-host",
+        "arch": "x86_64"
+      },
+      "model": {
+        "provider": "HUMAN",
+        "name": "gatekeeper",
+        "settings": {
+          "reasoning_effort": "high"
+        }
+      },
+      "tool": {
+        "name": "GH_CLI"
+      }
+    },
+    "worker": {
+      "agent_id": "ollama-planner-01",
+      "role": "PLANNER",
+      "runtime": "LOCAL",
+      "host": {
+        "kind": "OWNER_MACHINE",
+        "name": "worker-host",
+        "arch": "x86_64"
+      },
+      "model": {
+        "provider": "OLLAMA",
+        "name": "qwen3-coder:30b",
+        "settings": {
+          "reasoning_effort": "high"
+        }
+      },
+      "tool": {
+        "name": "OLLAMA"
+      }
+    }
+  },
+  "lane": {
+    "runtime": "CLOUD",
+    "reason": "The change is pure data and has no local hardware need.",
+    "requires": [
+      "NONE"
+    ]
+  },
+  "subsystem_scope": {
+    "allowed_files": [
+      "src/domain/item.md"
+    ],
+    "forbidden_paths": [
+      "docs/governance/"
+    ],
+    "components_touched": [
+      "core"
+    ],
+    "is_atomic": true,
+    "depends_on_packets": []
+  },
+  "data_contracts": {
+    "structures_defined_upfront": true,
+    "definitions": [
+      {
+        "language": "TEXT",
+        "path": "src/domain/item.md",
+        "definition": "record Item { id: string, value: string }"
+      }
+    ],
+    "public_api_change": "NONE",
+    "schema_diff_summary": "No released behavior changes in this example."
+  },
+  "verification_plan": {
+    "commands": [
+      "python3 -m unittest discover -s tools/gatecheck -v"
+    ],
+    "regression_tests": [
+      {
+        "name": "item_id_present_after_save",
+        "kind": "UNIT",
+        "asserts": "A saved item has an id."
+      }
+    ],
+    "deterministic": true
+  },
+  "abstraction_audit": {
+    "introduces_speculative_patterns": false,
+    "flagged_anti_patterns": []
+  },
+  "contract_notes": [
+    "This example does not change a released public contract."
+  ],
+  "use_cases": [
+    "UC-01"
+  ],
+  "layer": "domain",
+  "state_machines": [
+    "Item"
+  ],
+  "architecture_change": false
+}

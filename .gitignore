@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER
+# SPDX-License-Identifier: LicenseRef-UNSET
+
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Add product ignore rules here.
+# Do not commit secrets.
+.env
+.env.*

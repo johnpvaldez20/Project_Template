@@ -1,0 +1,9 @@
+This template does not choose a license.
+
+The marker in the project file is LicenseRef-UNSET.
+That marker is not a license and it grants no rights.
+Choose an SPDX license identifier.
+Put the license text in LICENSES/.
+Set spdx.license_id and spdx.copyright_line.
+Replace the SPDX lines in each text file.
+Read docs/governance/ADOPTING.md.

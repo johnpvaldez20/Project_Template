@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER
+# SPDX-License-Identifier: LicenseRef-UNSET
+
+# Runs on pull_request so a worker can open the pull request early.
+# The first run can be the red run. A later push on the same pull request
+# can be the green run. See docs/governance/GOVERNANCE_LINUS.md section 10.
+# The required check name is ci.job_name in .governance/project.json.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: gatecheck
+        run: python3 tools/gatecheck/gatecheck.py
+
+      - name: test
+        run: python3 -m unittest discover -s tools/gatecheck -v
+
+      - name: spdx
+        run: python3 tools/gatecheck/gatecheck.py --spdx-only
