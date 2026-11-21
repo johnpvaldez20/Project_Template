@@ -264,6 +264,20 @@ class AdoptionTest(repo_fixture.RepoCopyCase):
     """Edits that the adoption page tells a new project to make."""
 
     def test_project_can_set_its_identity(self):
+        self._set_identity()
+        self.assert_clean()
+        self.assertIn("project identity is set", gatecheck.run(self.root).passed)
+
+    def test_project_can_set_its_language(self):
+        self._set_identity()
+        repo_fixture.edit_json(
+            self.root,
+            ".governance/project.json",
+            lambda project: project["toolchain"].update(language="other-language"),
+        )
+        self.assert_clean()
+
+    def _set_identity(self) -> None:
         def identity(project):
             project["project"].update(
                 name="Widget",
@@ -274,16 +288,9 @@ class AdoptionTest(repo_fixture.RepoCopyCase):
 
         repo_fixture.edit_json(self.root, ".governance/project.json", identity)
         text = (self.root / "CODEOWNERS").read_text(encoding="utf-8")
-        repo_fixture.write_text(self.root, "CODEOWNERS", text.replace("@replace-me", "@example-owner"))
-        self.assert_clean()
-
-    def test_project_can_set_its_language(self):
-        repo_fixture.edit_json(
-            self.root,
-            ".governance/project.json",
-            lambda project: project["toolchain"].update(language="other-language"),
+        repo_fixture.write_text(
+            self.root, "CODEOWNERS", text.replace("@replace-me", "@example-owner")
         )
-        self.assert_clean()
 
     def test_project_can_raise_the_coverage_floor(self):
         repo_fixture.edit_json(
@@ -327,6 +334,106 @@ class AdoptionTest(repo_fixture.RepoCopyCase):
     def test_examples_need_their_architecture_file(self):
         (self.root / "docs/governance/examples/architecture.json").unlink()
         self.assert_fails_with("missing docs/governance/examples/architecture.json")
+
+
+class ProjectFileTest(repo_fixture.RepoCopyCase):
+    CONFIG = ".governance/project.json"
+
+    def test_unknown_key_fails(self):
+        self._edit(lambda project: project.update(extra=True))
+        self.assert_fails_with("additional property extra")
+
+    def test_missing_architecture_block_fails(self):
+        self._edit(lambda project: project.pop("architecture"))
+        self.assert_fails_with("missing required property architecture")
+
+    def test_coverage_floor_must_be_a_number(self):
+        self._edit(lambda project: project["policy"].update(coverage_floor_percent="85"))
+        self.assert_fails_with("policy/coverage_floor_percent: expected type number")
+
+    def test_pattern_that_does_not_compile_fails(self):
+        self._edit(lambda project: project["scope"]["protected_path_patterns"].append("("))
+        self.assert_fails_with("is not a regular expression")
+
+    def test_required_check_needs_a_command(self):
+        self._edit(lambda project: project["ci"]["required_checks"].append("lint"))
+        self.assert_fails_with("no command for the required check lint")
+
+    def test_test_check_must_be_a_required_check(self):
+        self._edit(lambda project: project["ci"].update(test_check="other"))
+        self.assert_fails_with("ci.test_check must be one of ci.required_checks")
+
+    def test_check_command_needs_an_allowed_prefix(self):
+        self._edit(lambda project: project["ci"]["check_commands"].update(test="make test"))
+        self.assert_fails_with("ci.check_commands.test does not start with a prefix")
+
+    def test_checker_directory_must_be_protected(self):
+        self._edit(
+            lambda project: project["scope"]["protected_path_patterns"].remove("^tools/gatecheck/")
+        )
+        self.assert_fails_with("tools/gatecheck/gatecheck.py must match scope.protected_path_patterns")
+
+    def test_layer_paths_must_not_overlap(self):
+        self._edit(
+            lambda project: project["architecture"]["layers"]["application"].append("src/domain/rules/")
+        )
+        self.assert_fails_with("layer paths src/domain/rules/ and src/domain/ overlap")
+
+    def test_layer_name_must_be_lower_case(self):
+        self._edit(lambda project: project["architecture"]["layers"].update(Core=["src/core/"]))
+        self.assert_fails_with("invalid layer name 'Core'")
+
+    def test_identity_that_is_partly_set_fails(self):
+        self._edit(lambda project: project["project"].update(name="Widget"))
+        self.assert_fails_with("project.repository still holds the template placeholder")
+
+    def test_template_must_not_choose_a_language(self):
+        self._edit(lambda project: project["toolchain"].update(language="other-language"))
+        self.assert_fails_with("toolchain.language is set but the project identity is a placeholder")
+
+    def test_schema_version_must_match_the_schema(self):
+        self._edit(lambda project: project.update(schema_version="9.9.9"))
+        self.assert_fails_with("schema_version 9.9.9 is not the schema constant")
+
+    def test_pin_file_is_a_protected_path(self):
+        project = repo_fixture.read_json(self.root, self.CONFIG)
+        self.assertFalse(gatecheck.path_is_protected("toolchain.lock", project))
+        project["toolchain"]["pin_file"] = "toolchain.lock"
+        self.assertTrue(gatecheck.path_is_protected("toolchain.lock", project))
+
+    def _edit(self, change) -> None:
+        repo_fixture.edit_json(self.root, self.CONFIG, change)
+
+
+class CodeownersTest(repo_fixture.RepoCopyCase):
+    HEADER = "# SPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER\n# SPDX-License-Identifier: LicenseRef-UNSET\n\n"
+
+    def test_missing_file_fails(self):
+        (self.root / "CODEOWNERS").unlink()
+        self.assert_fails_with("missing CODEOWNERS at the repository root")
+
+    def test_second_file_fails(self):
+        repo_fixture.write_text(self.root, ".github/CODEOWNERS", self.HEADER + "* @replace-me\n")
+        self.assert_fails_with(".github/CODEOWNERS must not exist")
+
+    def test_rule_without_the_owner_fails(self):
+        self._write("* @replace-me\n/src/ @someone-else\n")
+        self.assert_fails_with("CODEOWNERS rule /src/ does not name @replace-me")
+
+    def test_owner_in_a_comment_does_not_count(self):
+        self._write("# @replace-me\n* @someone-else\n")
+        self.assert_fails_with("CODEOWNERS rule * does not name @replace-me")
+
+    def test_file_needs_a_rule_for_every_path(self):
+        self._write("/docs/ @replace-me\n")
+        self.assert_fails_with("CODEOWNERS needs a rule for *")
+
+    def test_login_case_does_not_matter(self):
+        self._write("* @Replace-Me\n")
+        self.assert_clean()
+
+    def _write(self, rules: str) -> None:
+        repo_fixture.write_text(self.root, "CODEOWNERS", self.HEADER + rules)
 
 
 class RepositoryFilesTest(repo_fixture.RepoCopyCase):

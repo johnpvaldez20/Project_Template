@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import architecture
+import projectfile
 import repofiles
 import schema_validate
 import treecheck
@@ -35,35 +36,7 @@ GATE_FILES = {
     "G3_QA_MERGE": "gate3-qa-merge-handoff.schema.json",
 }
 
-REQUIRED_PATHS = (
-    "project.name",
-    "project.repository",
-    "project.owner_login",
-    "packet.id_prefix",
-    "spdx.license_id",
-    "spdx.copyright_line",
-    "spdx.extensions",
-    "scope.allowed_top_level",
-    "scope.protected_path_patterns",
-    "scope.amendment_path_patterns",
-    "verification.command_prefixes",
-    "lane.local_only_requires",
-    "hosts.local_kinds",
-    "hosts.cloud_kinds",
-    "hosts.ci_kinds",
-    "ci.workflow_file",
-    "ci.job_name",
-    "ci.required_checks",
-    "ci.test_check",
-    "ci.check_commands",
-    "toolchain.language",
-    "toolchain.pin_file",
-    "policy.max_cyclomatic_complexity",
-    "policy.coverage_floor_percent",
-    "policy.forbidden_constructs",
-    "gatekeeper.persona_id",
-    "gatekeeper.agent_id_pattern",
-)
+PROJECT_SCHEMA = "project.schema.json"
 
 
 class Report:
@@ -196,20 +169,11 @@ def packet_id_ok(packet_id: str, project: dict) -> bool:
 
 
 def path_is_protected(path: str, project: dict) -> bool:
-    return _matches_any(path, project["scope"]["protected_path_patterns"])
+    return projectfile.path_is_protected(path, project)
 
 
 def _matches_any(path: str, patterns: list[str]) -> bool:
     return any(re.search(pattern, path) for pattern in patterns)
-
-
-def _dig(document: dict, dotted: str) -> tuple[bool, Any]:
-    current: Any = document
-    for part in dotted.split("."):
-        if not isinstance(current, dict) or part not in current:
-            return False, None
-        current = current[part]
-    return True, current
 
 
 def _rel(root: Path, path: Path) -> str:
@@ -345,11 +309,13 @@ def _agent_errors(agent: dict, project: dict, label: str) -> list[str]:
     model = agent.get("model") if isinstance(agent.get("model"), dict) else {}
     if model.get("provider") == "OLLAMA" and runtime != "LOCAL":
         errors.append(f"{label} claims an OLLAMA model outside LOCAL runtime")
-    if agent.get("role") == "GATEKEEPER":
-        pattern = project["gatekeeper"]["agent_id_pattern"]
+    role = agent.get("role")
+    section = {"GATEKEEPER": "gatekeeper", "OWNER": "owner"}.get(role)
+    if section is not None:
+        pattern = project[section]["agent_id_pattern"]
         agent_id = agent.get("agent_id")
         if not isinstance(agent_id, str) or re.fullmatch(pattern, agent_id) is None:
-            errors.append(f"{label} gatekeeper agent_id does not match the configured pattern")
+            errors.append(f"{label} {section} agent_id does not match {section}.agent_id_pattern")
     return errors
 
 
@@ -465,21 +431,41 @@ def _walk_commands(node: Any) -> list[str]:
     return found
 
 
-def _check_config(project: dict, report: Report) -> bool:
-    missing = [path for path in REQUIRED_PATHS if not _dig(project, path)[0]]
-    if missing:
-        report.fail("project config is missing " + ", ".join(missing))
+def _check_config(
+    project: dict, schemas: schema_validate.SchemaSet, report: Report
+) -> bool:
+    """Apply the project schema. Then apply the rules a schema cannot state."""
+    if PROJECT_SCHEMA not in schemas.documents:
+        report.fail(f"missing {SCHEMAS_DIR}/{PROJECT_SCHEMA}")
         return False
-    commands = project["ci"]["check_commands"]
-    if not isinstance(commands, dict):
-        report.fail("ci.check_commands must be an object")
+    _ok, errors = schemas.validate_document(PROJECT_SCHEMA, project)
+    if not errors:
+        errors = projectfile.semantic_errors(project) + _version_errors(project, schemas)
+    report.record(
+        [f"{CONFIG_PATH}: {item}" for item in errors],
+        "project file matches project.schema.json",
+    )
+    if errors:
         return False
-    absent = [name for name in project["ci"]["required_checks"] if name not in commands]
-    if absent:
-        report.fail("ci.check_commands is missing " + ", ".join(absent))
-        return False
-    report.pass_("project config has the required keys")
+    if projectfile.is_template(project):
+        report.pass_("project identity is the template placeholder")
+    else:
+        report.pass_("project identity is set")
     return True
+
+
+def _version_errors(project: dict, schemas: schema_validate.SchemaSet) -> list[str]:
+    """The project file and the common schema must name one schema version."""
+    try:
+        target, _file = schemas.resolve(
+            "common.schema.json#/$defs/provenance/properties/schema_version", PROJECT_SCHEMA
+        )
+    except KeyError:
+        return ["common.schema.json does not define provenance.schema_version"]
+    expected = target.get("const") if isinstance(target, dict) else None
+    if project["schema_version"] != expected:
+        return [f"schema_version {project['schema_version']} is not the schema constant {expected}"]
+    return []
 
 
 def _load_schemas(root: Path, report: Report) -> schema_validate.SchemaSet | None:
@@ -654,11 +640,11 @@ def _cycles(root: Path, packets: list[tuple[Path, dict]], report: Report) -> Non
 def run(root: Path) -> Report:
     """Run every check against the repository at root."""
     report = Report()
-    project = _load_project(root, report)
-    if project is None:
-        return report
     schemas = _load_schemas(root, report)
     if schemas is None:
+        return report
+    project = _load_project(root, schemas, report)
+    if project is None:
         return report
     _check_examples(schemas, root, project, report)
     _check_packets(schemas, root, project, report)
@@ -666,7 +652,9 @@ def run(root: Path) -> Report:
     return report
 
 
-def _load_project(root: Path, report: Report) -> dict | None:
+def _load_project(
+    root: Path, schemas: schema_validate.SchemaSet, report: Report
+) -> dict | None:
     config_path = root / CONFIG_PATH
     if not config_path.is_file():
         report.fail(f"missing {CONFIG_PATH}")
@@ -676,7 +664,7 @@ def _load_project(root: Path, report: Report) -> dict | None:
     except json.JSONDecodeError as exc:
         report.fail(f"{CONFIG_PATH}: invalid JSON: {exc}")
         return None
-    if not isinstance(project, dict) or not _check_config(project, report):
+    if not _check_config(project, schemas, report):
         return None
     return project
 
@@ -752,9 +740,10 @@ def _check_tree(root: Path, project: dict, report: Report) -> None:
         treecheck.top_level_errors(files, project),
         "top-level paths match the project config",
     )
-    owners = treecheck.codeowners_errors(root, project)
-    if owners is not None:
-        report.record(owners, "CODEOWNERS matches project.owner_login")
+    report.record(
+        treecheck.codeowners_errors(root, files, project),
+        "CODEOWNERS names project.owner_login on each rule",
+    )
     workflow = treecheck.workflow_errors(root, project)
     if workflow is not None:
         report.record(workflow, "workflow matches the project CI config")
@@ -789,13 +778,12 @@ def main(argv: list[str] | None = None) -> int:
 
 def _spdx_only(root: Path) -> Report:
     report = Report()
-    config_path = root / CONFIG_PATH
-    try:
-        project = _load_json(config_path)
-    except (OSError, json.JSONDecodeError) as exc:
-        report.fail(f"{CONFIG_PATH}: {exc}")
+    schemas = _load_schemas(root, Report())
+    if schemas is None:
+        report.fail(f"no schemas found in {SCHEMAS_DIR}")
         return report
-    if not isinstance(project, dict) or not _check_config(project, report):
+    project = _load_project(root, schemas, report)
+    if project is None:
         return report
     _check_spdx(root, repofiles.list_files(root), project, report)
     return report

@@ -36,7 +36,8 @@
       "^\\.governance/",
       "^CODEOWNERS$",
       "^LICENSE$",
-      "^LICENSES/"
+      "^LICENSES/",
+      "^tools/gatecheck/"
     ],
     "amendment_path_patterns": [
       "^docs/design/packets/"
@@ -81,6 +82,9 @@
   "gatekeeper": {
     "persona_id": "overseer-linus-v1",
     "agent_id_pattern": "^(overseer-linus-v[0-9]+|owner-[a-z0-9-]+)$"
+  },
+  "owner": {
+    "agent_id_pattern": "^owner-[a-z0-9-]+$"
   },
   "architecture": {
     "document": "docs/design/ARCHITECTURE.md",

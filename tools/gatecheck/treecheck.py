@@ -54,15 +54,36 @@ def top_level_errors(files: list[str], project: dict) -> list[str]:
     ]
 
 
-def codeowners_errors(root: Path, project: dict) -> list[str] | None:
-    """Return None when the file is absent."""
-    path = root / "CODEOWNERS"
-    if not path.is_file():
-        return None
-    login = project["project"]["owner_login"]
-    if f"@{login}" not in path.read_text(encoding="utf-8"):
-        return [f"CODEOWNERS does not name @{login} from the project config"]
-    return []
+CODEOWNERS_PATHS = ("CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS")
+
+
+def codeowners_errors(root: Path, files: list[str], project: dict) -> list[str]:
+    """The root file must exist. Each rule must name the owner login."""
+    present = [path for path in CODEOWNERS_PATHS if path in files]
+    if "CODEOWNERS" not in present:
+        return ["missing CODEOWNERS at the repository root"]
+    errors = [
+        f"{path} must not exist. Keep one CODEOWNERS file at the repository root."
+        for path in present
+        if path != "CODEOWNERS"
+    ]
+    login = "@" + project["project"]["owner_login"].lower()
+    rules = _codeowners_rules(_read_text(root / "CODEOWNERS"))
+    if not any(pattern == "*" for pattern, _owners in rules):
+        errors.append("CODEOWNERS needs a rule for *")
+    for pattern, owners in rules:
+        if login not in owners:
+            errors.append(f"CODEOWNERS rule {pattern} does not name {login}")
+    return errors
+
+
+def _codeowners_rules(text: str) -> list[tuple[str, list[str]]]:
+    rules: list[tuple[str, list[str]]] = []
+    for line in text.splitlines():
+        parts = line.split("#", 1)[0].split()
+        if parts:
+            rules.append((parts[0], [owner.lower() for owner in parts[1:]]))
+    return rules
 
 
 def workflow_errors(root: Path, project: dict) -> list[str] | None:
