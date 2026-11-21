@@ -15,11 +15,7 @@ import gatecheck
 import importscan
 import repo_fixture
 
-HEADER = (
-    "# SPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER\n"
-    "# SPDX-License-Identifier: LicenseRef-UNSET\n"
-    "\n"
-)
+HEADER = repo_fixture.hash_header()
 CONFIG = ".governance/project.json"
 LAYERS = {
     "presentation": ["src/presentation/"],
@@ -261,7 +257,7 @@ class RegexScannerTest(ProjectCase):
 
 class ImportRuleConfigTest(ProjectCase):
     def test_template_must_not_set_a_scanner(self):
-        self.edit(lambda project: project["project"].update(repo_fixture.read_json(repo_fixture.SOURCE_ROOT, CONFIG)["project"]))
+        self.edit(lambda project: project["project"].update(repo_fixture.template_project()["project"]))
         self.rules(lambda rules: rules["scanners"].append(dict(PYTHON)))
         self.assert_fails_with("import_rules.scanners is set but the project identity is a placeholder")
 

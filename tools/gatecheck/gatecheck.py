@@ -59,20 +59,37 @@ path_is_protected = projectfile.path_is_protected
 
 
 class Report:
-    """Collected check lines. An empty failure list is success."""
+    """Collected check lines. An empty failure list is success.
+
+    An info line is a measured fact. It is not a pass and it is not a failure.
+    """
 
     def __init__(self) -> None:
-        self.passed: list[str] = []
-        self.failures: list[str] = []
+        self.lines: list[tuple[str, str]] = []
+
+    @property
+    def passed(self) -> list[str]:
+        return [text for kind, text in self.lines if kind == "ok"]
+
+    @property
+    def facts(self) -> list[str]:
+        return [text for kind, text in self.lines if kind == "info"]
+
+    @property
+    def failures(self) -> list[str]:
+        return [text for kind, text in self.lines if kind == "FAIL"]
 
     def is_clean(self) -> bool:
         return not self.failures
 
     def pass_(self, message: str) -> None:
-        self.passed.append(message)
+        self.lines.append(("ok", message))
+
+    def info(self, message: str) -> None:
+        self.lines.append(("info", message))
 
     def fail(self, message: str) -> None:
-        self.failures.append(message)
+        self.lines.append(("FAIL", message))
 
     def record(self, errors: list[str], ok_message: str) -> None:
         """Add each error as a failure. Add the pass line when the list is empty."""
@@ -82,8 +99,9 @@ class Report:
             self.fail(message)
 
     def __str__(self) -> str:
-        lines = [f"ok    {line}" for line in self.passed]
-        lines.extend(f"FAIL  {line}" for line in self.failures)
+        order = {"ok": 0, "info": 0, "FAIL": 1}
+        rows = sorted(self.lines, key=lambda row: order[row[0]])
+        lines = [f"{kind:<4}  {text}" for kind, text in rows]
         lines.append(f"{len(self.passed)} passed, {len(self.failures)} failed")
         return "\n".join(lines) + "\n"
 
@@ -283,7 +301,8 @@ def check_pull_request(
     report = Report()
     project = _context_project(root, report)
     if project is not None:
-        _add_findings(report, evidence.pull_request(root, project, base_ref, branch, env))
+        found = evidence.pull_request(root, project, base_ref, branch, env)
+        _add_findings(report, found, "the pull request follows the base, scope, and plan rules")
     return report
 
 
@@ -292,7 +311,8 @@ def check_reports(root: Path) -> Report:
     report = Report()
     project = _context_project(root, report)
     if project is not None:
-        _add_findings(report, evidence.reports(root, project))
+        found = evidence.reports(root, project)
+        _add_findings(report, found, "the reports show no failed test, no ignored test, and the coverage floor")
     return report
 
 
@@ -308,11 +328,10 @@ def _context_project(root: Path, report: Report) -> dict | None:
     return project
 
 
-def _add_findings(report: Report, found: evidence.Findings) -> None:
+def _add_findings(report: Report, found: evidence.Findings, ok_message: str) -> None:
     for line in found.facts:
-        report.pass_(line)
-    for line in found.errors:
-        report.fail(line)
+        report.info(line)
+    report.record(found.errors, ok_message)
 
 
 def _read_payload_file(

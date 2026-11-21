@@ -10,7 +10,7 @@ import unittest
 
 import repo_fixture
 
-HEADER = "# SPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER\n# SPDX-License-Identifier: LicenseRef-UNSET\n\n"
+HEADER = repo_fixture.hash_header()
 CI = ".github/workflows/ci.yml"
 RULESET = ".github/rulesets/main.json"
 PINNED = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
@@ -206,7 +206,7 @@ class RulesetTest(repo_fixture.RepoCopyCase):
         self.assert_clean()
 
 
-MARKDOWN_HEADER = "<!--\nSPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER\nSPDX-License-Identifier: LicenseRef-UNSET\n-->\n\n"
+MARKDOWN_HEADER = repo_fixture.markdown_header()
 CONSTRUCT = {
     "id": "NO_WAIT_CALL",
     "pattern": r"\bwait\(",

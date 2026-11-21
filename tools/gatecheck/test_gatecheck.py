@@ -14,6 +14,7 @@ from pathlib import Path
 
 import architecture
 import gatecheck
+import projectfile
 import repo_fixture
 import repofiles
 import schema_validate
@@ -406,7 +407,7 @@ class ProjectFileTest(repo_fixture.RepoCopyCase):
 
 
 class CodeownersTest(repo_fixture.RepoCopyCase):
-    HEADER = "# SPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER\n# SPDX-License-Identifier: LicenseRef-UNSET\n\n"
+    HEADER = repo_fixture.hash_header()
 
     def test_missing_file_fails(self):
         (self.root / "CODEOWNERS").unlink()
@@ -562,6 +563,24 @@ class RepositoryTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         report = gatecheck.run(root)
         self.assertTrue(report.is_clean(), str(report))
+
+    def test_snapshot_equals_the_template_files(self):
+        """A project that adopted the template keeps the snapshot as it is."""
+        project = repo_fixture.read_json(repo_fixture.SOURCE_ROOT, repo_fixture.CONFIG)
+        if projectfile.is_template(project):
+            self.assertEqual(
+                repo_fixture.snapshot_differences(),
+                [],
+                "run python3 tools/gatecheck/repo_fixture.py",
+            )
+
+    def test_tests_do_not_read_the_project_of_this_repository(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = repo_fixture.copy_repo(Path(tmp))
+            self.assertTrue(projectfile.is_template(repo_fixture.read_json(root, repo_fixture.CONFIG)))
+            self.assertFalse((root / "tools").exists())
+            report = gatecheck.run(root)
+            self.assertTrue(report.is_clean(), str(report))
 
 
 if __name__ == "__main__":

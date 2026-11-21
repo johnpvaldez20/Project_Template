@@ -15,7 +15,7 @@ import gatecheck
 import repo_fixture
 import repofiles
 
-HEADER = "<!--\nSPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER\nSPDX-License-Identifier: LicenseRef-UNSET\n-->\n\n"
+HEADER = repo_fixture.markdown_header()
 PACKET = "docs/design/packets/PKT-0001.json"
 BRANCH = "pkt/PKT-0001-item-record"
 TESTS = "item_id_present_after_save\nitem_draft_to_active\nitem_active_to_archived\n"
@@ -85,7 +85,7 @@ class PullRequestTest(GitRepoCase):
             "each modified file is in the allowed_files of PKT-0001",
             "each of the 3 planned regression tests is in the tree",
         ):
-            self.assertIn(fact, report.passed)
+            self.assertIn(fact, report.facts)
         self.assertEqual(len(head), 40)
 
     def test_stale_base_fails(self):
@@ -125,8 +125,8 @@ class PullRequestTest(GitRepoCase):
         self.commit("change the workflow")
         report = self.check()
         self.assertFalse(any("PROTECTED_PATH" in line for line in report.failures), str(report))
-        self.assertIn("touches_protected_paths true", report.passed)
-        self.assertIn("modified .github/workflows/ci.yml (protected)", report.passed)
+        self.assertIn("touches_protected_paths true", report.facts)
+        self.assertIn("modified .github/workflows/ci.yml (protected)", report.facts)
 
     def test_architecture_path_needs_an_architecture_packet(self):
         self._base_scope(["docs/design/ARCHITECTURE.md"])
@@ -161,7 +161,7 @@ class PullRequestTest(GitRepoCase):
         self.commit("add the second packet")
         report = self.check()
         self.assertTrue(report.is_clean(), str(report))
-        self.assertIn("packet PKT-0002 is new on this branch", report.passed)
+        self.assertIn("packet PKT-0002 is new on this branch", report.facts)
 
     def test_packet_branch_without_a_packet_file_fails(self):
         self.git("checkout", "-q", "-b", "pkt/PKT-0009-no-plan")
@@ -199,7 +199,7 @@ class PullRequestTest(GitRepoCase):
         self.commit("update the readme")
         report = self.check()
         self.assertTrue(report.is_clean(), str(report))
-        self.assertTrue(any("is not a packet branch" in line for line in report.passed))
+        self.assertTrue(any("is not a packet branch" in line for line in report.facts))
 
     def test_missing_base_ref_fails(self):
         report = gatecheck.check_pull_request(self.root, None, None, env={})
@@ -217,7 +217,7 @@ class PullRequestTest(GitRepoCase):
         env = {"GITHUB_BASE_REF": "main", "GITHUB_HEAD_REF": BRANCH}
         report = gatecheck.check_pull_request(self.root, None, None, env=env)
         self.assertTrue(report.is_clean(), str(report))
-        self.assertIn("packet PKT-0001 is read from the base commit", report.passed)
+        self.assertIn("packet PKT-0001 is read from the base commit", report.facts)
 
     def test_command_line_exit_code(self):
         self.git("checkout", "-q", "-b", BRANCH)
@@ -288,7 +288,7 @@ class ReportTest(repo_fixture.AdoptedRepoCase):
         report = self.check()
         self.assertTrue(report.is_clean(), str(report))
         for fact in ("total_tests 3", "failed_tests 0", "ignored_tests 0", "line_percentage 92.50 (floor 85)"):
-            self.assertIn(fact, report.passed)
+            self.assertIn(fact, report.facts)
 
     def test_skipped_test_fails(self):
         self.junit('<skipped message="later"/>')
@@ -337,18 +337,18 @@ class ReportTest(repo_fixture.AdoptedRepoCase):
 
     def test_cobertura_report_with_a_line_rate_only(self):
         self.coverage('<coverage line-rate="0.91"></coverage>\n')
-        self.assertIn("line_percentage 91.00 (floor 85)", self.check().passed)
+        self.assertIn("line_percentage 91.00 (floor 85)", self.check().facts)
 
     def test_jacoco_report(self):
         self.coverage(
             '<report name="x"><counter type="BRANCH" missed="9" covered="1"/>'
             '<counter type="LINE" missed="10" covered="90"/></report>\n'
         )
-        self.assertIn("line_percentage 90.00 (floor 85)", self.check().passed)
+        self.assertIn("line_percentage 90.00 (floor 85)", self.check().facts)
 
     def test_lcov_report(self):
         self.coverage("SF:a\nLF:60\nLH:57\nend_of_record\nSF:b\nLF:40\nLH:38\nend_of_record\n")
-        self.assertIn("line_percentage 95.00 (floor 85)", self.check().passed)
+        self.assertIn("line_percentage 95.00 (floor 85)", self.check().facts)
 
     def test_coverage_report_in_another_format_fails(self):
         self.coverage("total coverage: 99%\n")
@@ -379,7 +379,7 @@ class ReportConfigTest(repo_fixture.AdoptedRepoCase):
         self.assert_fails_with("ci.evidence must name the test report and the coverage report")
 
     def test_template_must_not_set_a_report(self):
-        source = repo_fixture.read_json(repo_fixture.SOURCE_ROOT, self.CONFIG)
+        source = repo_fixture.template_project()
 
         def template_with_reports(project):
             project["project"].update(source["project"])
