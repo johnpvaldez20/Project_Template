@@ -58,10 +58,9 @@ def load_packet(root: Path, packet_id: Any) -> dict | None:
     if not path.is_file():
         return None
     try:
-        packet = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+        return payloadrules.json_object(path.read_text(encoding="utf-8"))
+    except ValueError:
         return None
-    return packet if isinstance(packet, dict) else None
 
 
 def packet_errors(payload: dict, packet: dict | None) -> list[str]:
@@ -204,14 +203,11 @@ def _worker_id(payload: dict) -> str | None:
 
 
 def _allowed(payload: dict) -> set[str]:
-    return _names(_dict(payload.get("subsystem_scope")).get("allowed_files"))
+    return set(payloadrules.allowed_files(payload))
 
 
 def _tests(payload: dict) -> set[str]:
-    tests = _dict(payload.get("verification_plan")).get("regression_tests")
-    if not isinstance(tests, list):
-        return set()
-    return {item["name"] for item in tests if isinstance(item, dict) and isinstance(item.get("name"), str)}
+    return payloadrules.regression_test_names(payload)
 
 
 def _names(value: Any) -> set[str]:

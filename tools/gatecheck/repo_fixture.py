@@ -78,6 +78,28 @@ class RepoCopyCase(unittest.TestCase):
         )
 
 
+class AdoptedRepoCase(RepoCopyCase):
+    """A copy of the repository after a project set its identity."""
+
+    CONFIG = ".governance/project.json"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.edit(
+            lambda project: project["project"].update(
+                name="Widget",
+                full_name="Widget service",
+                repository="example/widget",
+                owner_login="example-owner",
+            )
+        )
+        owners = (self.root / "CODEOWNERS").read_text(encoding="utf-8")
+        write_text(self.root, "CODEOWNERS", owners.replace("@replace-me", "@example-owner"))
+
+    def edit(self, change: Callable[[Any], None]) -> None:
+        edit_json(self.root, self.CONFIG, change)
+
+
 class ExampleCase(unittest.TestCase):
     """A test case that changes one fact in a valid example."""
 

@@ -10,6 +10,7 @@ Each function returns failure lines. An empty list is success.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,30 @@ def paths_overlap(left: str, right: str) -> bool:
     if right.endswith("/") and left.startswith(right):
         return True
     return False
+
+
+def json_object(text: str) -> dict:
+    """Parse one JSON object. Raise ValueError for any other text."""
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid JSON: {exc}") from None
+    if not isinstance(value, dict):
+        raise ValueError("the JSON value is not an object")
+    return value
+
+
+def allowed_files(payload: dict) -> list[str]:
+    """Return the allowed_files of a packet or a Gate 1 payload."""
+    return _strings(_dict(payload.get("subsystem_scope")).get("allowed_files"))
+
+
+def regression_test_names(payload: dict) -> set[str]:
+    """Return the test names in the verification plan."""
+    tests = _list(_dict(payload.get("verification_plan")).get("regression_tests"))
+    return {
+        item["name"] for item in tests if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
 
 
 def path_is_normal(path: str) -> bool:

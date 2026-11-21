@@ -11,10 +11,27 @@ This module does not name a product or a product language.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 TEMPLATE_DIRS = ("docs/governance", ".github", "tools/gatecheck")
+WORKFLOWS_DIR = ".github/workflows/"
+RULESET_PATH = ".github/rulesets/main.json"
+REQUIRED_RULES = (
+    "deletion",
+    "non_fast_forward",
+    "required_linear_history",
+    "pull_request",
+    "required_status_checks",
+)
+REVIEW_FLAGS = (
+    "dismiss_stale_reviews_on_push",
+    "require_code_owner_review",
+    "require_last_push_approval",
+)
+
+_USES = re.compile(r"^\s*(?:-\s*)?uses:\s*['\"]?([^'\"\s]+)['\"]?\s*$", re.MULTILINE)
 
 
 def _banned_patterns() -> tuple[re.Pattern[str], ...]:
@@ -86,24 +103,154 @@ def _codeowners_rules(text: str) -> list[tuple[str, list[str]]]:
     return rules
 
 
-def workflow_errors(root: Path, project: dict) -> list[str] | None:
-    """Return None when the repository has no .github directory."""
-    workflow = root / ".github" / "workflows" / project["ci"]["workflow_file"]
-    if not workflow.is_file():
-        if (root / ".github").exists():
-            return [f"missing {workflow.relative_to(root).as_posix()}"]
+def workflow_errors(root: Path, files: list[str], project: dict) -> list[str] | None:
+    """Check the CI workflow and the hardening of each workflow file.
+
+    Return None when the repository has no .github directory.
+    """
+    if not any(path.startswith(".github/") for path in files):
         return None
-    text = workflow.read_text(encoding="utf-8")
+    name = WORKFLOWS_DIR + project["ci"]["workflow_file"]
+    if name not in files:
+        return [f"missing {name}"]
+    errors = _ci_workflow_errors(_yaml_code(_read_text(root / name)), project)
+    for path in files:
+        if path.startswith(WORKFLOWS_DIR) and path.endswith((".yml", ".yaml")):
+            code = _yaml_code(_read_text(root / path))
+            errors.extend(f"{path}: {item}" for item in _hardening_errors(code))
+    return errors
+
+
+def _yaml_code(text: str) -> str:
+    """Return the workflow text without comments."""
+    lines = [
+        re.sub(r"\s+#.*$", "", line)
+        for line in text.splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _ci_workflow_errors(code: str, project: dict) -> list[str]:
+    """The CI workflow gives the evidence for one exact commit."""
     job = project["ci"]["job_name"]
     errors: list[str] = []
-    if f"\n  {job}:\n" not in text or f"\n    name: {job}\n" not in text:
+    if f"\n  {job}:\n" not in code or f"\n    name: {job}\n" not in code:
         errors.append(f"workflow job name must be {job}")
-    if "pull_request:" not in text:
+    if "pull_request:" not in code:
         errors.append("workflow must run on pull_request")
     for command in project["ci"]["check_commands"].values():
-        if command not in text:
+        if command not in code:
             errors.append(f"workflow is missing command: {command}")
+    if re.search(r"cancel-in-progress:\s*true", code):
+        errors.append("workflow must not cancel a run. Each run is evidence for one commit.")
+    if "github.event.pull_request.head.sha" not in code:
+        errors.append("workflow must check out github.event.pull_request.head.sha")
+    if not re.search(r"fetch-depth:\s*0\b", code):
+        errors.append("workflow checkout needs fetch-depth: 0 for the pull request check")
     return errors
+
+
+def _hardening_errors(code: str) -> list[str]:
+    errors = [
+        f"action {target} is not pinned to a full commit SHA"
+        for target in _USES.findall(code)
+        if not _is_pinned(target)
+    ]
+    if not re.search(r"^permissions:", code, re.MULTILINE):
+        errors.append("the workflow needs a top-level permissions block")
+    if re.search(r"^permissions:\s*write-all", code, re.MULTILINE):
+        errors.append("permissions: write-all is not least privilege")
+    if re.search(r"\bpull_request_target\b", code):
+        errors.append("pull_request_target gives a write token to untrusted code. Use pull_request.")
+    checkouts = len(re.findall(r"uses:\s*['\"]?actions/checkout@", code))
+    if checkouts > len(re.findall(r"persist-credentials:\s*false", code)):
+        errors.append("each actions/checkout step needs persist-credentials: false")
+    return errors
+
+
+def _is_pinned(target: str) -> bool:
+    if target.startswith("./"):
+        return True
+    if target.startswith("docker://"):
+        return re.search(r"@sha256:[0-9a-f]{64}$", target) is not None
+    return re.search(r"@[0-9a-f]{40}$", target) is not None
+
+
+def ruleset_errors(root: Path, files: list[str], project: dict) -> list[str] | None:
+    """Check the ruleset file that the owner imports on the host.
+
+    Return None when the repository has no .github directory.
+    """
+    if not any(path.startswith(".github/") for path in files):
+        return None
+    if RULESET_PATH not in files:
+        return [f"missing {RULESET_PATH}"]
+    try:
+        ruleset = json.loads(_read_text(root / RULESET_PATH))
+    except json.JSONDecodeError as exc:
+        return [f"{RULESET_PATH}: invalid JSON: {exc}"]
+    if not isinstance(ruleset, dict):
+        return [f"{RULESET_PATH} must be an object"]
+    rules = {
+        rule.get("type"): _dict(rule.get("parameters"))
+        for rule in ruleset.get("rules") or []
+        if isinstance(rule, dict)
+    }
+    errors = _ruleset_shape_errors(ruleset, rules)
+    errors.extend(_review_rule_errors(rules.get("pull_request", {})))
+    errors.extend(_status_rule_errors(rules.get("required_status_checks", {}), project))
+    return [f"{RULESET_PATH}: {item}" for item in errors]
+
+
+def _ruleset_shape_errors(ruleset: dict, rules: dict) -> list[str]:
+    errors: list[str] = []
+    if ruleset.get("target") != "branch":
+        errors.append("target must be branch")
+    if ruleset.get("enforcement") != "active":
+        errors.append("enforcement must be active")
+    include = _dict(_dict(ruleset.get("conditions")).get("ref_name")).get("include")
+    if not isinstance(include, list) or "~DEFAULT_BRANCH" not in include:
+        errors.append("conditions.ref_name.include must contain ~DEFAULT_BRANCH")
+    for actor in ruleset.get("bypass_actors") or []:
+        if _dict(actor).get("bypass_mode") != "pull_request":
+            errors.append("a bypass actor must have bypass_mode pull_request")
+    for name in REQUIRED_RULES:
+        if name not in rules:
+            errors.append(f"rule {name} is missing")
+    return errors
+
+
+def _review_rule_errors(parameters: dict) -> list[str]:
+    errors = [
+        f"pull_request.{key} must be true"
+        for key in REVIEW_FLAGS
+        if parameters.get(key) is not True
+    ]
+    count = parameters.get("required_approving_review_count")
+    if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+        errors.append("pull_request.required_approving_review_count must be 1 or more")
+    if parameters.get("allowed_merge_methods") != ["squash"]:
+        errors.append("pull_request.allowed_merge_methods must be squash only")
+    return errors
+
+
+def _status_rule_errors(parameters: dict, project: dict) -> list[str]:
+    errors: list[str] = []
+    if parameters.get("strict_required_status_checks_policy") is not True:
+        errors.append("required_status_checks must require an up-to-date branch")
+    job = project["ci"]["job_name"]
+    checks = [_dict(item) for item in parameters.get("required_status_checks") or []]
+    named = [item for item in checks if item.get("context") == job]
+    if not named:
+        errors.append(f"required_status_checks must contain the context {job}")
+    elif not isinstance(named[0].get("integration_id"), int):
+        errors.append(f"the context {job} needs an integration_id. Only CI can give that status.")
+    return errors
+
+
+def _dict(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
 
 
 def spdx_errors(root: Path, files: list[str], project: dict) -> tuple[list[str], int]:

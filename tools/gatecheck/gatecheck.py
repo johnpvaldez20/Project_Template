@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import architecture
+import evidence
 import handoff
 import payloadrules
 import projectfile
@@ -255,10 +256,7 @@ def check_payload_files(
     try:
         schemas, project = load_context(root)
     except ValueError:
-        report.fail(
-            "the schemas or the project file are not correct. "
-            "Run the gate checker with no option."
-        )
+        _context_project(root, report)
         return report
     checked: list[dict] = []
     for name in names:
@@ -276,6 +274,45 @@ def check_payload_files(
     if len(checked) > 1:
         report.record(handoff.chain_errors(checked), "the payloads of each packet agree")
     return report
+
+
+def check_pull_request(
+    root: Path, base_ref: str | None = None, branch: str | None = None, env: Any = None
+) -> Report:
+    """Check the commits of one pull request. Print the facts that a verdict records."""
+    report = Report()
+    project = _context_project(root, report)
+    if project is not None:
+        _add_findings(report, evidence.pull_request(root, project, base_ref, branch, env))
+    return report
+
+
+def check_reports(root: Path) -> Report:
+    """Check the test report and the coverage report that CI wrote."""
+    report = Report()
+    project = _context_project(root, report)
+    if project is not None:
+        _add_findings(report, evidence.reports(root, project))
+    return report
+
+
+def _context_project(root: Path, report: Report) -> dict | None:
+    try:
+        _schemas, project = load_context(root)
+    except ValueError:
+        report.fail(
+            "the schemas or the project file are not correct. "
+            "Run the gate checker with no option."
+        )
+        return None
+    return project
+
+
+def _add_findings(report: Report, found: evidence.Findings) -> None:
+    for line in found.facts:
+        report.pass_(line)
+    for line in found.errors:
+        report.fail(line)
 
 
 def _read_payload_file(
@@ -617,9 +654,12 @@ def _check_tree(root: Path, project: dict, report: Report) -> None:
         treecheck.codeowners_errors(root, files, project),
         "CODEOWNERS names project.owner_login on each rule",
     )
-    workflow = treecheck.workflow_errors(root, project)
+    workflow = treecheck.workflow_errors(root, files, project)
     if workflow is not None:
-        report.record(workflow, "workflow matches the project CI config")
+        report.record(workflow, "workflows match the project CI config and the hardening rules")
+    ruleset = treecheck.ruleset_errors(root, files, project)
+    if ruleset is not None:
+        report.record(ruleset, f"{treecheck.RULESET_PATH} matches the branch rules of the contract")
     _check_spdx(root, files, project, report)
     report.record(
         treecheck.neutrality_errors(root, files),
@@ -657,6 +697,27 @@ def _parser() -> argparse.ArgumentParser:
         help="check gate payloads in files. A file holds JSON, or text with "
         "json gate-payload blocks. The name - reads standard input.",
     )
+    mode.add_argument(
+        "--pr",
+        action="store_true",
+        help="check the commits between the base branch and HEAD: head SHA, "
+        "fresh base, packet scope, protected paths, and planned tests",
+    )
+    mode.add_argument(
+        "--evidence",
+        action="store_true",
+        help="check the test report and the coverage report in ci.evidence",
+    )
+    parser.add_argument(
+        "--base",
+        metavar="REF",
+        help="base ref for --pr. The default is origin/$GITHUB_BASE_REF, then origin/main.",
+    )
+    parser.add_argument(
+        "--branch",
+        metavar="NAME",
+        help="branch name for --pr. The default is $GITHUB_HEAD_REF, then the current branch.",
+    )
     return parser
 
 
@@ -669,6 +730,10 @@ def main(argv: list[str] | None = None) -> int:
         report = run_architecture(root)
     elif args.payload:
         report = check_payload_files(root, args.payload)
+    elif args.pr:
+        report = check_pull_request(root, args.base, args.branch)
+    elif args.evidence:
+        report = check_reports(root)
     else:
         report = run(root)
     sys.stdout.write(str(report))

@@ -104,6 +104,9 @@ def _ci_errors(project: dict) -> list[str]:
     gatekeeper = project["gatekeeper"]
     if re.fullmatch(gatekeeper["agent_id_pattern"], gatekeeper["persona_id"]) is None:
         errors.append("gatekeeper.persona_id does not match gatekeeper.agent_id_pattern")
+    reports = list(ci["evidence"].values())
+    if any(item is None for item in reports) and any(item is not None for item in reports):
+        errors.append("ci.evidence must name the test report and the coverage report, or no report")
     return errors
 
 
@@ -237,4 +240,6 @@ def _template_errors(project: dict) -> list[str]:
         errors.append("toolchain.pin_file is set but the project identity is a placeholder")
     if project["architecture"]["import_rules"]["scanners"]:
         errors.append("import_rules.scanners is set but the project identity is a placeholder")
+    if any(value is not None for value in project["ci"]["evidence"].values()):
+        errors.append("ci.evidence is set but the project identity is a placeholder")
     return errors

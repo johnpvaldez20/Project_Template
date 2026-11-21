@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER
+# SPDX-License-Identifier: LicenseRef-UNSET
+
+# Each action in a workflow is pinned to a full commit SHA.
+# Dependabot opens a pull request when a pinned action has a new release.
+# The cooldown keeps a release out for seven days after its release date.
+# The pull request changes a protected path. The owner reviews it.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci

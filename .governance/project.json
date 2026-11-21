@@ -62,12 +62,17 @@
   "ci": {
     "workflow_file": "ci.yml",
     "job_name": "gate",
-    "required_checks": ["gatecheck", "test", "spdx"],
+    "required_checks": ["gatecheck", "test", "spdx", "scope"],
     "test_check": "test",
     "check_commands": {
       "gatecheck": "python3 tools/gatecheck/gatecheck.py",
       "test": "python3 -m unittest discover -s tools/gatecheck -v",
-      "spdx": "python3 tools/gatecheck/gatecheck.py --spdx-only"
+      "spdx": "python3 tools/gatecheck/gatecheck.py --spdx-only",
+      "scope": "python3 tools/gatecheck/gatecheck.py --pr"
+    },
+    "evidence": {
+      "test_report": null,
+      "coverage_report": null
     }
   },
   "toolchain": {

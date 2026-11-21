@@ -129,7 +129,14 @@
     },
     "ci": {
       "type": "object",
-      "required": ["workflow_file", "job_name", "required_checks", "test_check", "check_commands"],
+      "required": [
+        "workflow_file",
+        "job_name",
+        "required_checks",
+        "test_check",
+        "check_commands",
+        "evidence"
+      ],
       "additionalProperties": false,
       "properties": {
         "workflow_file": { "type": "string", "pattern": "^[A-Za-z0-9._-]+\\.ya?ml$" },
@@ -145,6 +152,22 @@
           "type": "object",
           "minProperties": 1,
           "additionalProperties": { "$ref": "common.schema.json#/$defs/command" }
+        },
+        "evidence": {
+          "type": "object",
+          "required": ["test_report", "coverage_report"],
+          "additionalProperties": false,
+          "description": "Reports that the product test command writes in CI. The --evidence option reads them. null means that the project has no report yet.",
+          "properties": {
+            "test_report": {
+              "anyOf": [{ "$ref": "common.schema.json#/$defs/scope_path" }, { "type": "null" }],
+              "description": "A JUnit XML file. A failed test or an ignored test fails the check."
+            },
+            "coverage_report": {
+              "anyOf": [{ "$ref": "common.schema.json#/$defs/scope_path" }, { "type": "null" }],
+              "description": "A Cobertura XML file, a JaCoCo XML file, or an LCOV file. A result below policy.coverage_floor_percent fails the check."
+            }
+          }
         }
       }
     },

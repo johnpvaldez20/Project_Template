@@ -118,24 +118,8 @@ class ImportScanTest(unittest.TestCase):
         )
 
 
-class ProjectCase(repo_fixture.RepoCopyCase):
-    """A copy of the repository that a project adopted."""
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.edit(
-            lambda project: project["project"].update(
-                name="Widget",
-                full_name="Widget service",
-                repository="example/widget",
-                owner_login="example-owner",
-            )
-        )
-        owners = (self.root / "CODEOWNERS").read_text(encoding="utf-8")
-        repo_fixture.write_text(self.root, "CODEOWNERS", owners.replace("@replace-me", "@example-owner"))
-
-    def edit(self, change) -> None:
-        repo_fixture.edit_json(self.root, CONFIG, change)
+class ProjectCase(repo_fixture.AdoptedRepoCase):
+    """An adopted copy with helpers for the import rules."""
 
     def rules(self, change) -> None:
         self.edit(lambda project: change(project["architecture"]["import_rules"]))
