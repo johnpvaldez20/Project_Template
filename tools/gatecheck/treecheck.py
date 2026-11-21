@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 
 TEMPLATE_DIRS = ("docs/governance", ".github", "tools/gatecheck")
 WORKFLOWS_DIR = ".github/workflows/"
+PRODUCT_CI_PATHS = (WORKFLOWS_DIR, ".github/dependabot.yml")
 RULESET_PATH = ".github/rulesets/main.json"
 ISSUE_FORM = ".github/ISSUE_TEMPLATE/work-packet.yml"
 REQUIRED_RULES = (
@@ -305,15 +306,16 @@ def spdx_errors(root: Path, files: list[str], project: dict) -> tuple[list[str],
 def neutrality_errors(root: Path, files: list[str], template: bool) -> list[str]:
     """Template paths must not name a product stack.
 
-    A project names its build tool in its workflows. The workflows are
-    checked only while the project identity is the template placeholder.
+    A project names its build tool in its workflows and in its update file.
+    Those files are checked only while the project identity is the template
+    placeholder.
     """
     errors: list[str] = []
     patterns = _banned_patterns()
     for relative in files:
         if not any(under(relative, directory) for directory in TEMPLATE_DIRS):
             continue
-        if relative.startswith(WORKFLOWS_DIR) and not template:
+        if relative.startswith(PRODUCT_CI_PATHS) and not template:
             continue
         text = _read_text(root / relative)
         for pattern in patterns:

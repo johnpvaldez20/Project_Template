@@ -327,6 +327,17 @@ class ProjectWorkflowTest(repo_fixture.AdoptedRepoCase):
         path.write_text(path.read_text(encoding="utf-8") + step, encoding="utf-8")
         self.assert_clean()
 
+    def test_project_update_file_can_name_its_package_tool(self):
+        text = HEADER + "version: 2\nupdates:\n  - package-ecosystem: " + "car" + "go\n    directory: /\n"
+        repo_fixture.write_text(self.root, ".github/dependabot.yml", text)
+        self.assert_clean()
+
+    def test_project_issue_form_must_stay_neutral(self):
+        repo_fixture.write_text(
+            self.root, ".github/ISSUE_TEMPLATE/other.yml", HEADER + "name: " + "car" + "go form\n"
+        )
+        self.assert_fails_with(".github/ISSUE_TEMPLATE/other.yml contains non-neutral text")
+
 
 class SecretTest(repo_fixture.RepoCopyCase):
     def test_environment_file_fails(self):
