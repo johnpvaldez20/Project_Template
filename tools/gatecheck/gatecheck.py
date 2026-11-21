@@ -16,12 +16,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import schema_validate
 import architecture
+import repofiles
+import schema_validate
+import treecheck
 
 SCHEMAS_DIR = "docs/governance/schemas"
 VALID_DIR = "docs/governance/examples/valid"
 INVALID_DIR = "docs/governance/examples/invalid"
+EXAMPLE_ARCHITECTURE = "docs/governance/examples/architecture.json"
 PACKETS_DIR = "docs/design/packets"
 CONFIG_PATH = ".governance/project.json"
 
@@ -31,28 +34,6 @@ GATE_FILES = {
     "G2_CODING": "gate2-coding-handoff.schema.json",
     "G3_QA_MERGE": "gate3-qa-merge-handoff.schema.json",
 }
-
-TEMPLATE_DIRS = ("docs/governance", ".github", "tools/gatecheck")
-
-
-def _banned_patterns() -> tuple[re.Pattern[str], ...]:
-    """Build the denylist without placing those words in this file."""
-    parts = (
-        ("ka", "te"),
-        ("ktext", "editor"),
-        (r"\b", "kd", "e", r"\b"),
-        ("mac", "os"),
-        ("mac", "book"),
-        ("ap", "fs"),
-        ("met", "al"),
-        ("upstream", "/"),
-        ("clip", "py"),
-        (r"\b", "car", "go", r"\b"),
-        ("rust-", "toolchain"),
-        ("rust", "fmt"),
-        ("owner_", "mac", "book"),
-    )
-    return tuple(re.compile("".join(item), re.IGNORECASE) for item in parts)
 
 REQUIRED_PATHS = (
     "project.name",
@@ -101,6 +82,13 @@ class Report:
     def fail(self, message: str) -> None:
         self.failures.append(message)
 
+    def record(self, errors: list[str], ok_message: str) -> None:
+        """Add each error as a failure. Add the pass line when the list is empty."""
+        if not errors:
+            self.pass_(ok_message)
+        for message in errors:
+            self.fail(message)
+
     def __str__(self) -> str:
         lines = [f"ok    {line}" for line in self.passed]
         lines.extend(f"FAIL  {line}" for line in self.failures)
@@ -120,13 +108,15 @@ def paths_overlap(left: str, right: str) -> bool:
 
 
 def expand_placeholders(value: Any, project: dict) -> Any:
-    """Replace repository and packet-id tokens. Examples stay free of a slug."""
+    """Replace project tokens. Examples stay free of a slug and a language id."""
     repository = project["project"]["repository"]
     base = f"https://github.com/{repository}"
     prefix = project["packet"]["id_prefix"]
+    language = project.get("toolchain", {}).get("language", "undecided")
 
     def one(text: str) -> str:
         text = text.replace("{{repository}}", repository).replace("{{github_base}}", base)
+        text = text.replace("{{toolchain_language}}", language)
         return re.sub(
             r"\{\{packet:([0-9]{4,})\}\}",
             lambda match: f"{prefix}-{match.group(1)}",
@@ -233,12 +223,16 @@ def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _load_json_dir(directory: Path) -> list[tuple[Path, Any]]:
+def _load_json_dir(root: Path, directory: Path, report: Report) -> list[tuple[Path, Any]]:
+    """Load each JSON file in one directory. Report a file that is not JSON."""
     if not directory.is_dir():
         return []
     found: list[tuple[Path, Any]] = []
     for path in sorted(directory.glob("*.json")):
-        found.append((path, _load_json(path)))
+        try:
+            found.append((path, _load_json(path)))
+        except json.JSONDecodeError as exc:
+            report.fail(f"{_rel(root, path)}: invalid JSON: {exc}")
     return found
 
 
@@ -568,6 +562,7 @@ def _packet_graph(root: Path, packets: list[tuple[Path, dict]], report: Report) 
             elif dep not in known:
                 report.fail(f"{_rel(root, path)}: depends_on_packets names unknown packet {dep}")
     _cycles(root, packets, report)
+    ordered = _ancestors(packets)
     conflicts = 0
     for index, (path_a, left) in enumerate(packets):
         for path_b, right in packets[index + 1 :]:
@@ -575,7 +570,7 @@ def _packet_graph(root: Path, packets: list[tuple[Path, dict]], report: Report) 
             id_b = right.get("packet_id")
             if not isinstance(id_a, str) or not isinstance(id_b, str):
                 continue
-            if id_b in _depends(left) or id_a in _depends(right):
+            if id_b in ordered.get(id_a, set()) or id_a in ordered.get(id_b, set()):
                 continue
             for file_a in _allowed(left):
                 for file_b in _allowed(right):
@@ -587,6 +582,27 @@ def _packet_graph(root: Path, packets: list[tuple[Path, dict]], report: Report) 
                         )
     if conflicts == 0 and len(packets) > 1:
         report.pass_(f"{len(packets)} packets have disjoint or dependency-ordered scopes")
+
+
+def _ancestors(packets: list[tuple[Path, dict]]) -> dict[str, set[str]]:
+    """Map each packet id to every packet it depends on, direct or not."""
+    graph = {
+        payload.get("packet_id"): _depends(payload)
+        for _, payload in packets
+        if isinstance(payload.get("packet_id"), str)
+    }
+    closure: dict[str, set[str]] = {}
+    for start in graph:
+        seen: set[str] = set()
+        stack = list(graph[start])
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            stack.extend(graph.get(node, []))
+        closure[start] = seen
+    return closure
 
 
 def _depends(payload: dict) -> list[str]:
@@ -635,137 +651,68 @@ def _cycles(root: Path, packets: list[tuple[Path, dict]], report: Report) -> Non
         walk(node)
 
 
-def _check_top_level(root: Path, project: dict, report: Report) -> None:
-    allowed = set(project["scope"]["allowed_top_level"])
-    for child in sorted(root.iterdir(), key=lambda item: item.name):
-        if child.name in {".git", "__pycache__"}:
-            continue
-        if child.name not in allowed:
-            report.fail(f"top-level path {child.name} is not in the project config")
-    report.pass_("top-level paths match the project config")
-
-
-def _check_codeowners(root: Path, project: dict, report: Report) -> None:
-    path = root / "CODEOWNERS"
-    if not path.is_file():
-        return
-    login = project["project"]["owner_login"]
-    text = path.read_text(encoding="utf-8")
-    if f"@{login}" not in text:
-        report.fail(f"CODEOWNERS does not name @{login} from the project config")
-    else:
-        report.pass_("CODEOWNERS matches project.owner_login")
-
-
-def _check_workflow(root: Path, project: dict, report: Report) -> None:
-    workflow = root / ".github" / "workflows" / project["ci"]["workflow_file"]
-    if not workflow.is_file():
-        if (root / ".github").exists():
-            report.fail(f"missing {workflow.relative_to(root).as_posix()}")
-        return
-    text = workflow.read_text(encoding="utf-8")
-    job = project["ci"]["job_name"]
-    ok = True
-    if f"\n  {job}:\n" not in text or f"\n    name: {job}\n" not in text:
-        report.fail(f"workflow job name must be {job}")
-        ok = False
-    if "pull_request:" not in text:
-        report.fail("workflow must run on pull_request")
-        ok = False
-    for command in project["ci"]["check_commands"].values():
-        if command not in text:
-            report.fail(f"workflow is missing command: {command}")
-            ok = False
-    if ok:
-        report.pass_("workflow matches the project CI config")
-
-
-def _check_spdx(root: Path, project: dict, report: Report) -> None:
-    extensions = {item.lower() for item in project["spdx"]["extensions"]}
-    basenames = set(project["spdx"].get("basenames", []))
-    exempt = set(project["spdx"].get("exempt_basenames", []))
-    copyright_line = project["spdx"]["copyright_line"]
-    license_line = f"SPDX-License-Identifier: {project['spdx']['license_id']}"
-    checked = 0
-    for path in _iter_files(root):
-        name = path.name
-        if name in exempt:
-            continue
-        if name not in basenames and path.suffix.lower() not in extensions:
-            continue
-        checked += 1
-        head = "\n".join(path.read_text(encoding="utf-8").splitlines()[:12])
-        rel = _rel(root, path)
-        if copyright_line not in head:
-            report.fail(f"{rel}: missing {copyright_line}")
-        if license_line not in head:
-            report.fail(f"{rel}: missing {license_line}")
-    if checked == 0:
-        report.fail("no files were checked for SPDX headers")
-    else:
-        report.pass_(f"checked SPDX headers on {checked} files")
-
-
-def _check_neutrality(root: Path, report: Report) -> None:
-    for relative in TEMPLATE_DIRS:
-        directory = root / relative
-        if not directory.exists():
-            continue
-        paths = [directory] if directory.is_file() else _iter_files(directory)
-        for path in paths:
-            if path.suffix.lower() in {".png", ".jpg"}:
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
-            for pattern in _banned_patterns():
-                match = pattern.search(text)
-                if match:
-                    report.fail(
-                        f"{_rel(root, path)} contains non-neutral text {match.group(0)!r}"
-                    )
-                    break
-    report.pass_("template paths do not name a product stack")
-
-
-def _iter_files(root: Path) -> list[Path]:
-    skip = {".git", "__pycache__", ".pytest_cache"}
-    found: list[Path] = []
-    if not root.exists():
-        return found
-    for path in root.rglob("*"):
-        if any(part in skip for part in path.parts):
-            continue
-        if path.is_file():
-            found.append(path)
-    found.sort()
-    return found
-
-
 def run(root: Path) -> Report:
     """Run every check against the repository at root."""
     report = Report()
+    project = _load_project(root, report)
+    if project is None:
+        return report
+    schemas = _load_schemas(root, report)
+    if schemas is None:
+        return report
+    _check_examples(schemas, root, project, report)
+    _check_packets(schemas, root, project, report)
+    _check_tree(root, project, report)
+    return report
+
+
+def _load_project(root: Path, report: Report) -> dict | None:
     config_path = root / CONFIG_PATH
     if not config_path.is_file():
         report.fail(f"missing {CONFIG_PATH}")
-        return report
+        return None
     try:
         project = _load_json(config_path)
     except json.JSONDecodeError as exc:
         report.fail(f"{CONFIG_PATH}: invalid JSON: {exc}")
-        return report
+        return None
     if not isinstance(project, dict) or not _check_config(project, report):
-        return report
+        return None
+    return project
 
-    schemas = _load_schemas(root, report)
-    if schemas is None:
-        return report
 
-    for relative, must_exist in ((VALID_DIR, True), (INVALID_DIR, True), (PACKETS_DIR, True)):
-        directory = root / relative
-        rows = _load_json_dir(directory)
-        if must_exist and not rows:
+def _example_project(root: Path, project: dict, report: Report) -> dict | None:
+    """Give the examples their own architecture catalog.
+
+    A project replaces its use cases and its state machines when it adopts
+    the template. The examples must stay valid after that edit.
+    """
+    path = root / EXAMPLE_ARCHITECTURE
+    if not path.is_file():
+        report.fail(f"missing {EXAMPLE_ARCHITECTURE}")
+        return None
+    try:
+        block = _load_json(path)
+    except json.JSONDecodeError as exc:
+        report.fail(f"{EXAMPLE_ARCHITECTURE}: invalid JSON: {exc}")
+        return None
+    if not isinstance(block, dict):
+        report.fail(f"{EXAMPLE_ARCHITECTURE} must be an object")
+        return None
+    example = dict(project)
+    example["architecture"] = block
+    return example
+
+
+def _check_examples(
+    schemas: schema_validate.SchemaSet, root: Path, project: dict, report: Report
+) -> None:
+    example = _example_project(root, project, report)
+    if example is None:
+        return
+    for relative in (VALID_DIR, INVALID_DIR):
+        rows = _load_json_dir(root, root / relative, report)
+        if not rows:
             report.fail(f"no payloads found in {relative}")
         for path, payload in rows:
             _check_payload(
@@ -773,29 +720,54 @@ def run(root: Path) -> Report:
                 root,
                 path,
                 payload,
-                project,
+                example,
                 report,
                 must_reject=relative == INVALID_DIR,
             )
 
-    packets: list[tuple[Path, dict]] = []
-    for path, payload in _load_json_dir(root / PACKETS_DIR):
-        if isinstance(payload, dict):
-            packets.append((path, expand_placeholders(payload, project)))
+
+def _check_packets(
+    schemas: schema_validate.SchemaSet, root: Path, project: dict, report: Report
+) -> None:
+    rows = _load_json_dir(root, root / PACKETS_DIR, report)
+    if not rows:
+        report.fail(f"no payloads found in {PACKETS_DIR}")
+    for path, payload in rows:
+        _check_payload(schemas, root, path, payload, project, report, must_reject=False)
+    packets = [
+        (path, expand_placeholders(payload, project))
+        for path, payload in rows
+        if isinstance(payload, dict)
+    ]
     if packets:
         _packet_graph(root, packets, report)
     coverage_problems = architecture.coverage_errors(packets, project, root)
-    for message in coverage_problems:
-        report.fail(message)
-    if isinstance(project.get("architecture"), dict) and not coverage_problems:
-        report.pass_("architecture catalog is covered by packets")
+    if isinstance(project.get("architecture"), dict):
+        report.record(coverage_problems, "architecture catalog is covered by packets")
 
-    _check_top_level(root, project, report)
-    _check_codeowners(root, project, report)
-    _check_workflow(root, project, report)
-    _check_spdx(root, project, report)
-    _check_neutrality(root, report)
-    return report
+
+def _check_tree(root: Path, project: dict, report: Report) -> None:
+    files = repofiles.list_files(root)
+    report.record(
+        treecheck.top_level_errors(files, project),
+        "top-level paths match the project config",
+    )
+    owners = treecheck.codeowners_errors(root, project)
+    if owners is not None:
+        report.record(owners, "CODEOWNERS matches project.owner_login")
+    workflow = treecheck.workflow_errors(root, project)
+    if workflow is not None:
+        report.record(workflow, "workflow matches the project CI config")
+    _check_spdx(root, files, project, report)
+    report.record(
+        treecheck.neutrality_errors(root, files),
+        "template paths do not name a product stack",
+    )
+
+
+def _check_spdx(root: Path, files: list[str], project: dict, report: Report) -> None:
+    errors, checked = treecheck.spdx_errors(root, files, project)
+    report.record(errors, f"checked SPDX headers on {checked} files")
 
 
 def default_root() -> Path:
@@ -825,7 +797,7 @@ def _spdx_only(root: Path) -> Report:
         return report
     if not isinstance(project, dict) or not _check_config(project, report):
         return report
-    _check_spdx(root, project, report)
+    _check_spdx(root, repofiles.list_files(root), project, report)
     return report
 
 

@@ -109,7 +109,7 @@
   },
   "coverage": {
     "tool": "configured",
-    "line_percentage": 92,
+    "line_percentage": 100,
     "scope": [
       "core"
     ]

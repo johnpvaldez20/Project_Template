@@ -59,7 +59,7 @@
   "gate1_verdict_url": "{{github_base}}/issues/3#issuecomment-3100000003",
   "verdict": "PASS",
   "toolchain": {
-    "language": "undecided",
+    "language": "{{toolchain_language}}",
     "version": "undecided",
     "matches_pin": true
   },
@@ -81,7 +81,7 @@
     "commits_in_pr": 2
   },
   "taste_metrics": {
-    "max_cyclomatic_complexity": 3,
+    "max_cyclomatic_complexity": 1,
     "special_case_branches_eliminated": true,
     "silent_error_swallowing_detected": false
   },
