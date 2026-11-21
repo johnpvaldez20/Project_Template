@@ -5,7 +5,14 @@
 """Validate work packets, gate payloads, headers, and repository shape.
 
 The project values live in .governance/project.json. This tool reads that
-file. It does not name a product or a product language. It also checks the architecture catalog from that file.
+file. It does not name a product or a product language.
+
+With no option, the tool checks the full repository.
+--architecture checks the catalog, the packets, and the import direction.
+--payload checks gate payloads that are in files.
+--pr checks the commits between the base branch and HEAD.
+--evidence checks the test report and the coverage report from CI.
+--spdx-only checks the license headers.
 """
 
 from __future__ import annotations
@@ -136,9 +143,9 @@ def expand_placeholders(value: Any, project: dict) -> Any:
 
 def materialize_payload(payload: dict, project: dict) -> dict:
     """Fill config-owned CI checks so examples follow the project file."""
-    evidence = payload.get("ci_evidence")
-    if isinstance(evidence, dict) and evidence.get("checks") == "{{required_checks}}":
-        evidence["checks"] = _checks_from_config(project)
+    ci_evidence = payload.get("ci_evidence")
+    if isinstance(ci_evidence, dict) and ci_evidence.get("checks") == "{{required_checks}}":
+        ci_evidence["checks"] = _checks_from_config(project)
     return payload
 
 
@@ -312,7 +319,9 @@ def check_reports(root: Path) -> Report:
     project = _context_project(root, report)
     if project is not None:
         found = evidence.reports(root, project)
-        _add_findings(report, found, "the reports show no failed test, no ignored test, and the coverage floor")
+        _add_findings(
+            report, found, "the reports show no failed test, no ignored test, and the coverage floor"
+        )
     return report
 
 
@@ -658,9 +667,10 @@ def _check_packets(
     ]
     if packets:
         _packet_graph(root, packets, report)
-    coverage_problems = architecture.coverage_errors(packets, project, root)
-    if isinstance(project.get("architecture"), dict):
-        report.record(coverage_problems, "architecture catalog is covered by packets")
+    report.record(
+        architecture.coverage_errors(packets, project, root),
+        "architecture catalog is covered by packets",
+    )
 
 
 def _check_tree(root: Path, project: dict, report: Report) -> None:
@@ -679,6 +689,9 @@ def _check_tree(root: Path, project: dict, report: Report) -> None:
     ruleset = treecheck.ruleset_errors(root, files, project)
     if ruleset is not None:
         report.record(ruleset, f"{treecheck.RULESET_PATH} matches the branch rules of the contract")
+    form = treecheck.issue_form_errors(root, files, project)
+    if form is not None:
+        report.record(form, "the work packet form lists the layers of the project file")
     _check_spdx(root, files, project, report)
     report.record(
         treecheck.neutrality_errors(root, files, projectfile.is_template(project)),

@@ -8,6 +8,7 @@ Run: python3 -m unittest discover -s tools/gatecheck -v
 
 import unittest
 
+import gatecheck
 import repo_fixture
 
 HEADER = repo_fixture.hash_header()
@@ -204,6 +205,43 @@ class RulesetTest(repo_fixture.RepoCopyCase):
             self.root, RULESET, lambda ruleset: ruleset.update(bypass_actors=[actor])
         )
         self.assert_clean()
+
+
+FORM = ".github/ISSUE_TEMPLATE/work-packet.yml"
+FORM_TEXT = (
+    HEADER
+    + "name: Work packet\nbody:\n"
+    + "  - type: dropdown\n    id: layer\n    attributes:\n      label: Layer\n      options:\n"
+    + "{options}"
+    + "    validations:\n      required: true\n"
+    + "  - type: dropdown\n    id: lane\n    attributes:\n      options:\n        - cloud\n"
+)
+
+
+class IssueFormTest(repo_fixture.RepoCopyCase):
+    def form(self, layers: list) -> None:
+        options = "".join(f"        - {name}\n" for name in layers)
+        repo_fixture.write_text(self.root, FORM, FORM_TEXT.format(options=options))
+
+    def test_form_with_the_project_layers_passes(self):
+        self.form(["domain", "application", "presentation", "infrastructure"])
+        self.assert_clean()
+        self.assertIn(
+            "the work packet form lists the layers of the project file",
+            gatecheck.run(self.root).passed,
+        )
+
+    def test_form_with_an_old_layer_list_fails(self):
+        self.form(["domain", "application", "presentation"])
+        self.assert_fails_with("the layer options ['application', 'domain', 'presentation'] are not the layers")
+
+    def test_form_without_a_layer_field_fails(self):
+        repo_fixture.write_text(self.root, FORM, HEADER + "name: Work packet\nbody: []\n")
+        self.assert_fails_with("has no field with the id layer")
+
+    def test_form_of_this_repository_has_a_layer_field(self):
+        text = (repo_fixture.SOURCE_ROOT / FORM).read_text(encoding="utf-8")
+        self.assertIn("    id: layer\n", text)
 
 
 MARKDOWN_HEADER = repo_fixture.markdown_header()

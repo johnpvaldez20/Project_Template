@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath
 TEMPLATE_DIRS = ("docs/governance", ".github", "tools/gatecheck")
 WORKFLOWS_DIR = ".github/workflows/"
 RULESET_PATH = ".github/rulesets/main.json"
+ISSUE_FORM = ".github/ISSUE_TEMPLATE/work-packet.yml"
 REQUIRED_RULES = (
     "deletion",
     "non_fast_forward",
@@ -248,6 +249,27 @@ def _status_rule_errors(parameters: dict, project: dict) -> list[str]:
     elif not isinstance(named[0].get("integration_id"), int):
         errors.append(f"the context {job} needs an integration_id. Only CI can give that status.")
     return errors
+
+
+def issue_form_errors(root: Path, files: list[str], project: dict) -> list[str] | None:
+    """The layer list of the work packet form must equal the layers of the project.
+
+    Return None when the repository has no work packet form.
+    """
+    if ISSUE_FORM not in files:
+        return None
+    code = _yaml_code(_read_text(root / ISSUE_FORM))
+    block = re.search(r"\n    id: layer\n(.*?)(?=\n  - type:|\Z)", code, re.DOTALL)
+    if block is None:
+        return [f"{ISSUE_FORM} has no field with the id layer"]
+    options = set(re.findall(r"^\s+- ([a-z][a-z0-9-]*)\s*$", block.group(1), re.MULTILINE))
+    layers = set(project["architecture"]["layers"])
+    if options != layers:
+        return [
+            f"{ISSUE_FORM}: the layer options {sorted(options)} "
+            f"are not the layers of the project file {sorted(layers)}"
+        ]
+    return []
 
 
 def _dict(value: object) -> dict:
