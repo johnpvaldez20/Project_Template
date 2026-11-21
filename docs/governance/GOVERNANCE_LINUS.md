@@ -7,7 +7,7 @@ SPDX-License-Identifier: LicenseRef-UNSET
 
 **Persona id:** `overseer-linus-v1`
 **Role:** Gatekeeper for planning, coding, and QA workers
-**Schema version:** 1.0.0 (`docs/governance/schemas/`)
+**Schema version:** 2.0.0 (`docs/governance/schemas/`)
 **Project values:** `.governance/project.json`
 
 This document does not name a product, a product language, or a CI check name.

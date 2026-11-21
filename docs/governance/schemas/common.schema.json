@@ -79,7 +79,7 @@
                 "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
                 "reasoning_effort": {
                   "type": "string",
-                  "enum": ["none", "low", "medium", "high", "xhigh"]
+                  "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
                 },
                 "context_window_tokens": { "type": "integer", "minimum": 1024 },
                 "quantization": { "type": "string" }
@@ -128,7 +128,7 @@
       "required": ["schema_version", "produced_at", "author", "worker"],
       "additionalProperties": false,
       "properties": {
-        "schema_version": { "type": "string", "const": "1.0.0" },
+        "schema_version": { "type": "string", "const": "2.0.0" },
         "produced_at": { "type": "string", "format": "date-time" },
         "author": { "$ref": "#/$defs/agent" },
         "worker": { "$ref": "#/$defs/agent" }
@@ -189,7 +189,7 @@
     "scope_path": {
       "type": "string",
       "pattern": "^(?!\\.\\./)[A-Za-z0-9._][A-Za-z0-9._/-]*$",
-      "description": "A repository-relative file, or a directory when it ends with /."
+      "description": "A repository-relative file, or a directory when it ends with /. The gate checker rejects an empty segment, a . segment, and a .. segment."
     },
     "command": {
       "type": "string",

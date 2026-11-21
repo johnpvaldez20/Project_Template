@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import architecture
+import payloadrules
 import projectfile
 import repofiles
 import schema_validate
@@ -26,6 +27,7 @@ SCHEMAS_DIR = "docs/governance/schemas"
 VALID_DIR = "docs/governance/examples/valid"
 INVALID_DIR = "docs/governance/examples/invalid"
 EXAMPLE_ARCHITECTURE = "docs/governance/examples/architecture.json"
+EXAMPLE_INDEX = "docs/governance/examples/README.md"
 PACKETS_DIR = "docs/design/packets"
 CONFIG_PATH = ".governance/project.json"
 
@@ -37,6 +39,15 @@ GATE_FILES = {
 }
 
 PROJECT_SCHEMA = "project.schema.json"
+
+
+paths_overlap = payloadrules.paths_overlap
+forbidden_packet_keys = payloadrules.forbidden_packet_keys
+command_allowed = payloadrules.command_allowed
+lane_conflicts = payloadrules.lane_conflicts
+packet_id_ok = payloadrules.packet_id_ok
+payload_extra_errors = payloadrules.extra_errors
+path_is_protected = projectfile.path_is_protected
 
 
 class Report:
@@ -67,17 +78,6 @@ class Report:
         lines.extend(f"FAIL  {line}" for line in self.failures)
         lines.append(f"{len(self.passed)} passed, {len(self.failures)} failed")
         return "\n".join(lines) + "\n"
-
-
-def paths_overlap(left: str, right: str) -> bool:
-    """True when two scope entries name the same path or a directory child."""
-    if left == right:
-        return True
-    if left.endswith("/") and right.startswith(left):
-        return True
-    if right.endswith("/") and left.startswith(right):
-        return True
-    return False
 
 
 def expand_placeholders(value: Any, project: dict) -> Any:
@@ -135,47 +135,6 @@ def _checks_from_config(project: dict) -> dict:
     return checks
 
 
-def forbidden_packet_keys(value: Any) -> list[str]:
-    """Return issue_number and base_sha keys found anywhere in a packet."""
-    found: set[str] = set()
-
-    def walk(node: Any) -> None:
-        if isinstance(node, dict):
-            for key, item in node.items():
-                if key in {"issue_number", "base_sha"}:
-                    found.add(key)
-                walk(item)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
-
-    walk(value)
-    return sorted(found)
-
-
-def command_allowed(command: str, project: dict) -> bool:
-    prefixes = project["verification"]["command_prefixes"]
-    return any(command.startswith(prefix) for prefix in prefixes)
-
-
-def lane_conflicts(project: dict, runtime: str, requires: list[str]) -> bool:
-    local_only = set(project["lane"]["local_only_requires"])
-    return runtime != "LOCAL" and bool(local_only & set(requires))
-
-
-def packet_id_ok(packet_id: str, project: dict) -> bool:
-    prefix = re.escape(project["packet"]["id_prefix"])
-    return re.fullmatch(rf"{prefix}-[0-9]{{4,}}", packet_id) is not None
-
-
-def path_is_protected(path: str, project: dict) -> bool:
-    return projectfile.path_is_protected(path, project)
-
-
-def _matches_any(path: str, patterns: list[str]) -> bool:
-    return any(re.search(pattern, path) for pattern in patterns)
-
-
 def _rel(root: Path, path: Path) -> str:
     try:
         return path.relative_to(root).as_posix()
@@ -197,237 +156,6 @@ def _load_json_dir(root: Path, directory: Path, report: Report) -> list[tuple[Pa
             found.append((path, _load_json(path)))
         except json.JSONDecodeError as exc:
             report.fail(f"{_rel(root, path)}: invalid JSON: {exc}")
-    return found
-
-
-def payload_extra_errors(payload: dict, project: dict, root: Path | None = None) -> list[str]:
-    """Rules that depend on project config, or that a schema cannot express."""
-    errors: list[str] = []
-    gate = payload.get("gate")
-    if gate == "PACKET":
-        for key in forbidden_packet_keys(payload):
-            errors.append(
-                f"design packet must not contain {key}; record it on the issue or pull request"
-            )
-    if isinstance(payload.get("packet_id"), str) and not packet_id_ok(payload["packet_id"], project):
-        errors.append(f"packet_id {payload['packet_id']} does not use the configured prefix")
-
-    repository = project["project"]["repository"]
-    base = f"https://github.com/{repository}/"
-    for value in _walk_key(payload, "repository"):
-        if value != repository:
-            errors.append(f"repository {value} does not match the project config")
-    for value in _walk_strings(payload):
-        if value.startswith("https://github.com/") and not value.startswith(base):
-            errors.append(f"github url is outside the configured repository: {value}")
-        if "{{" in value:
-            errors.append(f"unexpanded placeholder in {value}")
-
-    for command in _walk_commands(payload):
-        if not command_allowed(command, project):
-            errors.append(f"command is not allowed by the project config: {command}")
-
-    lane = payload.get("lane")
-    if isinstance(lane, dict):
-        requires = lane.get("requires")
-        runtime = lane.get("runtime")
-        if isinstance(requires, list) and isinstance(runtime, str):
-            if lane_conflicts(project, runtime, requires):
-                errors.append("lane runtime is not LOCAL but requires a local-only capability")
-
-    provenance = payload.get("provenance")
-    if isinstance(provenance, dict):
-        for label in ("author", "worker"):
-            agent = provenance.get(label)
-            if isinstance(agent, dict):
-                errors.extend(_agent_errors(agent, project, label))
-
-    scope = payload.get("subsystem_scope")
-    if isinstance(scope, dict) and isinstance(scope.get("allowed_files"), list):
-        gatekeeper = payload.get("gatekeeper_packet") is True
-        worker_role = _worker_role(payload)
-        for raw in scope["allowed_files"]:
-            if not isinstance(raw, str):
-                continue
-            top = raw.strip("/").split("/", 1)[0]
-            if top not in project["scope"]["allowed_top_level"]:
-                errors.append(f"allowed file {raw} is outside allowed top-level paths")
-            protected = path_is_protected(raw, project)
-            if protected and gate == "PACKET" and not gatekeeper:
-                errors.append(f"protected path {raw} requires gatekeeper_packet true")
-            if protected and gate != "PACKET" and worker_role not in {"GATEKEEPER", "OWNER"}:
-                errors.append(f"protected path {raw} requires a gatekeeper or owner worker")
-            if gate == "PACKET" and _amendment_blocked(raw, payload, project):
-                errors.append(f"packet amendment path {raw} requires gatekeeper_packet true")
-
-    if gate == "G3_QA_MERGE":
-        errors.extend(_gate3_errors(payload, project))
-    if gate == "G2_CODING" and payload.get("verdict") == "PASS":
-        errors.extend(_gate2_errors(payload, project))
-    toolchain = payload.get("toolchain")
-    if isinstance(toolchain, dict) and "language" in toolchain:
-        expected = project["toolchain"]["language"]
-        if toolchain.get("language") != expected:
-            errors.append(f"toolchain language does not match the project config {expected}")
-    errors.extend(architecture.payload_errors(payload, project, root))
-    return errors
-
-
-def _worker_role(payload: dict) -> str | None:
-    worker = payload.get("provenance", {})
-    if isinstance(worker, dict):
-        agent = worker.get("worker")
-        if isinstance(agent, dict):
-            role = agent.get("role")
-            if isinstance(role, str):
-                return role
-    return None
-
-
-def _amendment_blocked(path: str, payload: dict, project: dict) -> bool:
-    if payload.get("gatekeeper_packet") is True:
-        return False
-    if not _matches_any(path, project["scope"]["amendment_path_patterns"]):
-        return False
-    packet_id = payload.get("packet_id")
-    own = f"docs/design/packets/{packet_id}.json"
-    return path.rstrip("/") != own
-
-
-def _agent_errors(agent: dict, project: dict, label: str) -> list[str]:
-    errors: list[str] = []
-    runtime = agent.get("runtime")
-    host = agent.get("host") if isinstance(agent.get("host"), dict) else {}
-    kind = host.get("kind")
-    expected = {
-        "LOCAL": project["hosts"]["local_kinds"],
-        "CLOUD": project["hosts"]["cloud_kinds"],
-        "GITHUB_ACTIONS": project["hosts"]["ci_kinds"],
-    }.get(runtime)
-    if expected is not None and kind not in expected:
-        errors.append(f"{label} host kind {kind} does not match runtime {runtime}")
-    model = agent.get("model") if isinstance(agent.get("model"), dict) else {}
-    if model.get("provider") == "OLLAMA" and runtime != "LOCAL":
-        errors.append(f"{label} claims an OLLAMA model outside LOCAL runtime")
-    role = agent.get("role")
-    section = {"GATEKEEPER": "gatekeeper", "OWNER": "owner"}.get(role)
-    if section is not None:
-        pattern = project[section]["agent_id_pattern"]
-        agent_id = agent.get("agent_id")
-        if not isinstance(agent_id, str) or re.fullmatch(pattern, agent_id) is None:
-            errors.append(f"{label} {section} agent_id does not match {section}.agent_id_pattern")
-    return errors
-
-
-def _gate3_errors(payload: dict, project: dict) -> list[str]:
-    errors: list[str] = []
-    github = payload.get("github") if isinstance(payload.get("github"), dict) else {}
-    evidence = payload.get("ci_evidence") if isinstance(payload.get("ci_evidence"), dict) else {}
-    head = github.get("head_sha")
-    ci_head = evidence.get("head_sha")
-    if isinstance(head, str) and isinstance(ci_head, str) and head != ci_head:
-        errors.append(f"ci_evidence.head_sha {ci_head} does not match github.head_sha {head}")
-    if payload.get("verdict") != "MERGE_APPROVED":
-        return errors
-    checks = evidence.get("checks") if isinstance(evidence.get("checks"), dict) else {}
-    for name in project["ci"]["required_checks"]:
-        step = checks.get(name)
-        if not isinstance(step, dict):
-            errors.append(f"MERGE_APPROVED is missing required check {name}")
-            continue
-        if step.get("exit_code") != 0:
-            errors.append(f"required check {name} exit_code is not 0")
-    test_name = project["ci"]["test_check"]
-    test_step = checks.get(test_name)
-    if isinstance(test_step, dict):
-        if test_step.get("failed_tests", 0) != 0:
-            errors.append(f"{test_name} failed_tests is not 0")
-        if test_step.get("ignored_tests", 0) != 0:
-            errors.append(f"{test_name} ignored_tests is not 0")
-        total = test_step.get("total_tests", 0)
-        if not isinstance(total, int) or isinstance(total, bool) or total < 1:
-            errors.append(f"{test_name} total_tests is below 1")
-    coverage = payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {}
-    waiver = coverage.get("waiver") if isinstance(coverage.get("waiver"), dict) else {}
-    percent = coverage.get("line_percentage")
-    floor = project["policy"]["coverage_floor_percent"]
-    granted = waiver.get("granted") is True
-    if not granted and (not isinstance(percent, (int, float)) or isinstance(percent, bool) or percent < floor):
-        errors.append(f"coverage {percent} is below the configured floor {floor}")
-    audit = payload.get("test_integrity_audit")
-    if isinstance(audit, dict) and isinstance(audit.get("regression_test"), dict):
-        regression = audit["regression_test"]
-        green = regression.get("green_run") if isinstance(regression.get("green_run"), dict) else {}
-        if regression.get("required") is True and green.get("head_sha") != head:
-            errors.append("green_run.head_sha does not match github.head_sha")
-    return errors
-
-
-def _gate2_errors(payload: dict, project: dict) -> list[str]:
-    errors: list[str] = []
-    taste = payload.get("taste_metrics") if isinstance(payload.get("taste_metrics"), dict) else {}
-    complexity = taste.get("max_cyclomatic_complexity")
-    limit = project["policy"]["max_cyclomatic_complexity"]
-    if isinstance(complexity, int) and not isinstance(complexity, bool) and complexity > limit:
-        errors.append(f"max_cyclomatic_complexity {complexity} is above the configured limit {limit}")
-    hygiene = payload.get("diff_hygiene") if isinstance(payload.get("diff_hygiene"), dict) else {}
-    added = hygiene.get("forbidden_constructs_added")
-    if isinstance(added, int) and not isinstance(added, bool) and added != 0:
-        errors.append("PASS records forbidden constructs")
-    return errors
-
-
-def _walk_key(node: Any, key: str) -> list[Any]:
-    found: list[Any] = []
-
-    def walk(current: Any) -> None:
-        if isinstance(current, dict):
-            for name, value in current.items():
-                if name == key:
-                    found.append(value)
-                walk(value)
-        elif isinstance(current, list):
-            for item in current:
-                walk(item)
-
-    walk(node)
-    return found
-
-
-def _walk_strings(node: Any) -> list[str]:
-    found: list[str] = []
-
-    def walk(current: Any) -> None:
-        if isinstance(current, str):
-            found.append(current)
-        elif isinstance(current, dict):
-            for value in current.values():
-                walk(value)
-        elif isinstance(current, list):
-            for item in current:
-                walk(item)
-
-    walk(node)
-    return found
-
-
-def _walk_commands(node: Any) -> list[str]:
-    found: list[str] = []
-
-    def walk(current: Any) -> None:
-        if isinstance(current, dict):
-            for key, value in current.items():
-                if key == "command" and isinstance(value, str):
-                    found.append(value)
-                elif key == "commands" and isinstance(value, list):
-                    found.extend(item for item in value if isinstance(item, str))
-                else:
-                    walk(value)
-        elif isinstance(current, list):
-            for item in current:
-                walk(item)
-
-    walk(current := node)
     return found
 
 
@@ -490,6 +218,28 @@ def _load_schemas(root: Path, report: Report) -> schema_validate.SchemaSet | Non
     return schema_validate.SchemaSet(documents)
 
 
+def load_context(root: Path) -> tuple[schema_validate.SchemaSet, dict]:
+    """Load the schemas and the project file. Raise ValueError when one fails."""
+    report = Report()
+    schemas = _load_schemas(root, report)
+    project = _load_project(root, schemas, report) if schemas is not None else None
+    if schemas is None or project is None:
+        raise ValueError(str(report))
+    return schemas, project
+
+
+def payload_errors(
+    schemas: schema_validate.SchemaSet, payload: dict, project: dict, root: Path | None
+) -> list[str]:
+    """Return the schema errors and the rule errors for one payload."""
+    gate = payload.get("gate")
+    schema_name = GATE_FILES.get(gate) if isinstance(gate, str) else None
+    if schema_name is None or schema_name not in schemas.documents:
+        return ["missing or unknown gate"]
+    _ok, errors = schemas.validate_document(schema_name, payload)
+    return list(errors) + payload_extra_errors(payload, project, root)
+
+
 def _check_payload(
     schemas: schema_validate.SchemaSet,
     root: Path,
@@ -505,17 +255,13 @@ def _check_payload(
         report.fail(f"{name}: payload is not an object")
         return
     expanded = materialize_payload(expand_placeholders(payload, project), project)
-    gate = expanded.get("gate")
-    schema_name = GATE_FILES.get(gate) if isinstance(gate, str) else None
-    if schema_name is None or schema_name not in schemas.documents:
+    errors = payload_errors(schemas, expanded, project, root)
+    if errors == ["missing or unknown gate"]:
         if must_reject:
             report.fail(f"{name}: invalid examples must still name a known gate")
         else:
             report.fail(f"{name}: missing or unknown gate")
         return
-    ok, errors = schemas.validate_document(schema_name, expanded)
-    errors = list(errors)
-    errors.extend(payload_extra_errors(expanded, project, root))
     if must_reject:
         if errors:
             report.pass_(f"{name} is rejected ({len(errors)} error(s), first: {errors[0]})")
@@ -669,7 +415,7 @@ def _load_project(
     return project
 
 
-def _example_project(root: Path, project: dict, report: Report) -> dict | None:
+def example_project(root: Path, project: dict, report: Report) -> dict | None:
     """Give the examples their own architecture catalog.
 
     A project replaces its use cases and its state machines when it adopts
@@ -695,7 +441,7 @@ def _example_project(root: Path, project: dict, report: Report) -> dict | None:
 def _check_examples(
     schemas: schema_validate.SchemaSet, root: Path, project: dict, report: Report
 ) -> None:
-    example = _example_project(root, project, report)
+    example = example_project(root, project, report)
     if example is None:
         return
     for relative in (VALID_DIR, INVALID_DIR):
@@ -712,6 +458,19 @@ def _check_examples(
                 report,
                 must_reject=relative == INVALID_DIR,
             )
+    _check_example_index(root, report)
+
+
+def _check_example_index(root: Path, report: Report) -> None:
+    """Each invalid example must have a row in the examples page."""
+    index = root / EXAMPLE_INDEX
+    text = index.read_text(encoding="utf-8") if index.is_file() else ""
+    missing = [
+        f"{_rel(root, path)} has no row in {EXAMPLE_INDEX}"
+        for path in sorted((root / INVALID_DIR).glob("*.json"))
+        if f"`{path.stem}`" not in text
+    ]
+    report.record(missing, "each invalid example has a row in the examples page")
 
 
 def _check_packets(

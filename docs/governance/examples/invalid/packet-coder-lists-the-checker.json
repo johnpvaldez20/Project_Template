@@ -8,7 +8,7 @@
   "gatekeeper_packet": false,
   "regression_required": true,
   "provenance": {
-    "schema_version": "1.0.0",
+    "schema_version": "2.0.0",
     "produced_at": "2026-10-31T18:00:00Z",
     "author": {
       "agent_id": "overseer-linus-v1",

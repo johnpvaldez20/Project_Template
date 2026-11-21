@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/governance/schemas/gate2-coding-handoff.schema.json",
   "title": "Gate2CodingHandoff",
-  "description": "Gate 2 verdict on the diff. The gatekeeper posts it as a pull request review. Test results belong to Gate 3.",
+  "description": "Gate 2 verdict on the diff. The gatekeeper posts it as a pull request review. Test results belong to Gate 3. The author is a GATEKEEPER or an OWNER. The author is not the worker. The complexity limit is in the project file.",
   "type": "object",
   "required": [
     "gate",
@@ -22,7 +22,12 @@
   "properties": {
     "gate": { "type": "string", "const": "G2_CODING" },
     "packet_id": { "$ref": "common.schema.json#/$defs/packet_id" },
-    "provenance": { "$ref": "common.schema.json#/$defs/provenance" },
+    "provenance": {
+      "$ref": "common.schema.json#/$defs/provenance",
+      "properties": {
+        "author": { "properties": { "role": { "enum": ["GATEKEEPER", "OWNER"] } } }
+      }
+    },
     "github": {
       "$ref": "common.schema.json#/$defs/github",
       "required": ["repository", "branch", "pr_number", "head_sha", "merge_base_is_main_head"]
@@ -135,7 +140,6 @@
           },
           "taste_metrics": {
             "properties": {
-              "max_cyclomatic_complexity": { "maximum": 10 },
               "special_case_branches_eliminated": { "const": true },
               "silent_error_swallowing_detected": { "const": false }
             }

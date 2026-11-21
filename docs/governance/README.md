@@ -21,6 +21,6 @@ Schemas use JSON Schema 2020-12.
 Project values live in `.governance/project.json`.
 `python3 tools/gatecheck/gatecheck.py` checks schemas, examples, packets, headers, paths, and the architecture catalog.
 
-Schema version is 1.0.0.
+Schema version is 2.0.0.
 This is the generic template.
 It is not a continuation of a product-specific schema.

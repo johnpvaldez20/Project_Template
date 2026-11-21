@@ -76,3 +76,33 @@ class RepoCopyCase(unittest.TestCase):
             any(fragment in line for line in failures),
             f"no failure contains {fragment!r}: {failures}",
         )
+
+
+class ExampleCase(unittest.TestCase):
+    """A test case that changes one fact in a valid example."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.schemas, cls.project = gatecheck.load_context(SOURCE_ROOT)
+        cls.context = gatecheck.example_project(SOURCE_ROOT, cls.project, gatecheck.Report())
+
+    def example(self, name: str) -> dict:
+        """Load one valid example with the project tokens filled in."""
+        payload = read_json(SOURCE_ROOT, f"docs/governance/examples/valid/{name}.json")
+        expanded = gatecheck.expand_placeholders(payload, self.context)
+        return gatecheck.materialize_payload(expanded, self.context)
+
+    def packet(self) -> dict:
+        return read_json(SOURCE_ROOT, "docs/design/packets/PKT-0001.json")
+
+    def errors(self, payload: dict, live: bool = False) -> list[str]:
+        """Return the checker errors. A live payload uses the project catalog."""
+        project = self.project if live else self.context
+        return gatecheck.payload_errors(self.schemas, payload, project, SOURCE_ROOT)
+
+    def assert_rejected(self, payload: dict, fragment: str, live: bool = False) -> None:
+        errors = self.errors(payload, live)
+        self.assertTrue(
+            any(fragment in line for line in errors),
+            f"no error contains {fragment!r}: {errors}",
+        )

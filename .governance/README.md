@@ -17,7 +17,7 @@ Replace the placeholder strings before you use the repository for a product.
 
 | Field | Placeholder | Meaning |
 |---|---|---|
-| `schema_version` | `1.0.0` | Schema set version. Bump it when an old valid payload becomes invalid. |
+| `schema_version` | `2.0.0` | Schema set version. Bump it when an old valid payload becomes invalid. |
 | `project.name` | `PROJECT-NAME` | Short name. The checker does not compare prose to this field. |
 | `project.full_name` | `Replace with the full project name` | Display name. The checker does not read it. |
 | `project.version` | `0.0.0` | Version string. The checker does not read it. |

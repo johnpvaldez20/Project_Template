@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/governance/schemas/gate3-qa-merge-handoff.schema.json",
   "title": "Gate3QaMergeHandoff",
-  "description": "Gate 3 verdict. The gatekeeper posts it as a pull request review. A MERGE_APPROVED is followed by a squash merge. Only the gatekeeper merges.",
+  "description": "Gate 3 verdict. The gatekeeper posts it as a pull request review. A MERGE_APPROVED is followed by a squash merge. Only the gatekeeper merges. The author is a GATEKEEPER or an OWNER. The author is not the worker. The merger is not the worker.",
   "type": "object",
   "required": [
     "gate",
@@ -23,7 +23,12 @@
   "properties": {
     "gate": { "type": "string", "const": "G3_QA_MERGE" },
     "packet_id": { "$ref": "common.schema.json#/$defs/packet_id" },
-    "provenance": { "$ref": "common.schema.json#/$defs/provenance" },
+    "provenance": {
+      "$ref": "common.schema.json#/$defs/provenance",
+      "properties": {
+        "author": { "properties": { "role": { "enum": ["GATEKEEPER", "OWNER"] } } }
+      }
+    },
     "github": {
       "$ref": "common.schema.json#/$defs/github",
       "required": ["repository", "branch", "pr_number", "head_sha", "merge_base_is_main_head"]
