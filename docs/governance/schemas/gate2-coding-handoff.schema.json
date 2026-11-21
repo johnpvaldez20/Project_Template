@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/governance/schemas/gate2-coding-handoff.schema.json",
+  "title": "Gate2CodingHandoff",
+  "description": "Gate 2 verdict on the diff. The gatekeeper posts it as a pull request review. Test results belong to Gate 3.",
+  "type": "object",
+  "required": [
+    "gate",
+    "packet_id",
+    "provenance",
+    "github",
+    "handoff_artifact",
+    "gate1_verdict_url",
+    "verdict",
+    "toolchain",
+    "diff_hygiene",
+    "taste_metrics",
+    "violations",
+    "overseer_critique"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "gate": { "type": "string", "const": "G2_CODING" },
+    "packet_id": { "$ref": "common.schema.json#/$defs/packet_id" },
+    "provenance": { "$ref": "common.schema.json#/$defs/provenance" },
+    "github": {
+      "$ref": "common.schema.json#/$defs/github",
+      "required": ["repository", "branch", "pr_number", "head_sha", "merge_base_is_main_head"]
+    },
+    "handoff_artifact": {
+      "$ref": "common.schema.json#/$defs/handoff_artifact",
+      "properties": { "kind": { "enum": ["PR_REVIEW", "PR_COMMENT"] } }
+    },
+    "gate1_verdict_url": { "$ref": "common.schema.json#/$defs/github_url" },
+    "verdict": {
+      "type": "string",
+      "enum": ["PASS", "REJECT_AND_REVERT", "REJECT_STALE_BASE"]
+    },
+    "toolchain": {
+      "type": "object",
+      "required": ["language", "version", "matches_pin"],
+      "additionalProperties": false,
+      "properties": {
+        "language": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "matches_pin": { "type": "boolean" }
+      }
+    },
+    "diff_hygiene": {
+      "type": "object",
+      "required": [
+        "files_modified",
+        "out_of_scope_files",
+        "contains_unrelated_formatting",
+        "touches_protected_paths",
+        "dependencies_added",
+        "forbidden_constructs_added",
+        "commits_in_pr"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "files_modified": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "out_of_scope_files": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "contains_unrelated_formatting": { "type": "boolean" },
+        "touches_protected_paths": { "type": "boolean" },
+        "dependencies_added": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "version", "justification"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+              "version": { "type": "string", "minLength": 1 },
+              "justification": { "type": "string", "minLength": 30 }
+            }
+          }
+        },
+        "forbidden_constructs_added": { "type": "integer", "minimum": 0 },
+        "commits_in_pr": { "type": "integer", "minimum": 1 },
+        "net_line_delta": { "type": "integer" }
+      }
+    },
+    "taste_metrics": {
+      "type": "object",
+      "required": [
+        "max_cyclomatic_complexity",
+        "special_case_branches_eliminated",
+        "silent_error_swallowing_detected"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "max_cyclomatic_complexity": { "type": "integer", "minimum": 1 },
+        "special_case_branches_eliminated": { "type": "boolean" },
+        "silent_error_swallowing_detected": { "type": "boolean" }
+      }
+    },
+    "violations": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "SCOPE_VIOLATION",
+          "USERSPACE_REGRESSION",
+          "BAD_TASTE_BRANCHING",
+          "HALLUCINATED_ABSTRACTION",
+          "SILENT_FAILURE_MASKING",
+          "NOISY_DIFF",
+          "UNJUSTIFIED_DEPENDENCY",
+          "PROTECTED_PATH",
+          "FORBIDDEN_CONSTRUCT",
+          "TOOLCHAIN_MISMATCH",
+          "STALE_BASE",
+          "SIDE_CHANNEL_HANDOFF",
+          "MISSING_GATE1_PASS"
+        ]
+      }
+    },
+    "overseer_critique": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "verdict": { "const": "PASS" } }, "required": ["verdict"] },
+      "then": {
+        "properties": {
+          "github": { "properties": { "merge_base_is_main_head": { "const": true } } },
+          "toolchain": { "properties": { "matches_pin": { "const": true } } },
+          "diff_hygiene": {
+            "properties": {
+              "out_of_scope_files": { "maxItems": 0 },
+              "contains_unrelated_formatting": { "const": false },
+              "forbidden_constructs_added": { "const": 0 }
+            }
+          },
+          "taste_metrics": {
+            "properties": {
+              "max_cyclomatic_complexity": { "maximum": 10 },
+              "special_case_branches_eliminated": { "const": true },
+              "silent_error_swallowing_detected": { "const": false }
+            }
+          },
+          "violations": { "maxItems": 0 }
+        }
+      },
+      "else": {
+        "properties": {
+          "violations": { "minItems": 1 },
+          "overseer_critique": { "minLength": 40 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "verdict": { "const": "REJECT_STALE_BASE" } },
+        "required": ["verdict"]
+      },
+      "then": {
+        "properties": {
+          "github": { "properties": { "merge_base_is_main_head": { "const": false } } },
+          "violations": { "contains": { "const": "STALE_BASE" } }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["diff_hygiene"],
+        "properties": {
+          "diff_hygiene": {
+            "required": ["touches_protected_paths"],
+            "properties": { "touches_protected_paths": { "const": true } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "worker": { "properties": { "role": { "enum": ["GATEKEEPER", "OWNER"] } } }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

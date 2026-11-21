@@ -1,0 +1,266 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/governance/schemas/common.schema.json",
+  "title": "GovernanceCommon",
+  "description": "Shared definitions for packet plans and the three gate payloads. Project values are not stored here. The gate checker reads .governance/project.json.",
+  "$defs": {
+    "packet_id": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*-[0-9]{4,}$",
+      "description": "Work packet id. The prefix comes from the project config. The gate checker rejects a different prefix."
+    },
+    "sha40": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Full 40-character lowercase git commit SHA."
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+      "description": "owner/name. The gate checker requires the value from the project config."
+    },
+    "github_url": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/",
+      "description": "A URL inside the one repository. The gate checker checks the repository prefix."
+    },
+    "runtime": {
+      "type": "string",
+      "enum": ["LOCAL", "CLOUD", "GITHUB_ACTIONS"],
+      "description": "LOCAL is the owner machine. CLOUD is a cloud worker. GITHUB_ACTIONS is CI, and it is the only runtime whose result counts at Gate 3."
+    },
+    "host_kind": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,40}$",
+      "description": "Host class. Allowed values for each runtime are in the project config."
+    },
+    "agent_role": {
+      "type": "string",
+      "enum": ["PLANNER", "CODER", "QA", "GATEKEEPER", "OWNER"]
+    },
+    "model_provider": {
+      "type": "string",
+      "enum": ["ANTHROPIC", "OPENAI", "GOOGLE", "XAI", "CURSOR", "OLLAMA", "HUMAN", "OTHER"]
+    },
+    "agent": {
+      "type": "object",
+      "required": ["agent_id", "role", "runtime", "host", "model"],
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"
+        },
+        "role": { "$ref": "#/$defs/agent_role" },
+        "runtime": { "$ref": "#/$defs/runtime" },
+        "host": {
+          "type": "object",
+          "required": ["kind", "name"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "$ref": "#/$defs/host_kind" },
+            "name": { "type": "string", "minLength": 1 },
+            "os": { "type": "string" },
+            "arch": { "type": "string", "enum": ["aarch64", "x86_64"] }
+          }
+        },
+        "model": {
+          "type": "object",
+          "required": ["provider", "name"],
+          "additionalProperties": false,
+          "properties": {
+            "provider": { "$ref": "#/$defs/model_provider" },
+            "name": { "type": "string", "minLength": 1 },
+            "settings": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+                "reasoning_effort": {
+                  "type": "string",
+                  "enum": ["none", "low", "medium", "high", "xhigh"]
+                },
+                "context_window_tokens": { "type": "integer", "minimum": 1024 },
+                "quantization": { "type": "string" }
+              }
+            }
+          }
+        },
+        "tool": {
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "enum": [
+                "CURSOR_IDE",
+                "CURSOR_CLOUD_AGENT",
+                "CURSOR_CLI",
+                "OLLAMA",
+                "GITHUB_WEB",
+                "GH_CLI",
+                "OTHER"
+              ]
+            },
+            "version": { "type": "string" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["model"],
+            "properties": {
+              "model": {
+                "required": ["provider"],
+                "properties": { "provider": { "const": "OLLAMA" } }
+              }
+            }
+          },
+          "then": { "properties": { "runtime": { "const": "LOCAL" } } }
+        }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["schema_version", "produced_at", "author", "worker"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "type": "string", "const": "1.0.0" },
+        "produced_at": { "type": "string", "format": "date-time" },
+        "author": { "$ref": "#/$defs/agent" },
+        "worker": { "$ref": "#/$defs/agent" }
+      }
+    },
+    "github": {
+      "type": "object",
+      "description": "GitHub coordinates for a verdict. issue_number and base_sha are optional. Do not put them in a packet file. Record the issue on the issue or pull request. Record the base as the pull request base. A verdict may copy the current base at review time.",
+      "required": ["repository", "branch"],
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "$ref": "#/$defs/repository" },
+        "issue_number": { "type": "integer", "minimum": 1 },
+        "branch": {
+          "type": "string",
+          "pattern": "^pkt/[A-Z][A-Z0-9]*-[0-9]{4,}-[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "base_sha": { "$ref": "#/$defs/sha40" },
+        "pr_number": { "type": "integer", "minimum": 1 },
+        "head_sha": { "$ref": "#/$defs/sha40" },
+        "merge_base_is_main_head": { "type": "boolean" }
+      }
+    },
+    "handoff_artifact": {
+      "type": "object",
+      "required": ["kind", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "ISSUE",
+            "ISSUE_COMMENT",
+            "PULL_REQUEST",
+            "PR_REVIEW",
+            "PR_COMMENT",
+            "CHECK_RUN",
+            "COMMIT"
+          ]
+        },
+        "url": { "$ref": "#/$defs/github_url" }
+      }
+    },
+    "lane": {
+      "type": "object",
+      "required": ["runtime", "reason", "requires"],
+      "additionalProperties": false,
+      "properties": {
+        "runtime": { "type": "string", "enum": ["LOCAL", "CLOUD", "EITHER"] },
+        "reason": { "type": "string", "minLength": 20 },
+        "requires": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+        }
+      }
+    },
+    "scope_path": {
+      "type": "string",
+      "pattern": "^(?!\\.\\./)[A-Za-z0-9._][A-Za-z0-9._/-]*$",
+      "description": "A repository-relative file, or a directory when it ends with /."
+    },
+    "command": {
+      "type": "string",
+      "minLength": 3,
+      "description": "A verification command. The project config lists the allowed prefixes."
+    },
+    "definition": {
+      "type": "object",
+      "required": ["language", "path", "definition"],
+      "additionalProperties": false,
+      "properties": {
+        "language": {
+          "type": "string",
+          "enum": [
+            "TEXT",
+            "JSON",
+            "JSON_SCHEMA",
+            "TOML",
+            "YAML",
+            "MARKDOWN_TABLE",
+            "PYTHON",
+            "RUST",
+            "KOTLIN",
+            "GO",
+            "JAVA",
+            "CPP",
+            "TYPESCRIPT",
+            "OTHER"
+          ]
+        },
+        "path": { "$ref": "#/$defs/scope_path" },
+        "definition": { "type": "string", "minLength": 20 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["language"],
+            "properties": { "language": { "const": "RUST" } }
+          },
+          "then": {
+            "properties": {
+              "path": { "pattern": "\\.rs$" },
+              "definition": {
+                "pattern": "(^|\\n)\\s*(#\\[|pub |impl\\b|trait |type |const |static |enum |struct |fn )"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "anti_pattern": {
+      "type": "string",
+      "enum": [
+        "SPECULATIVE_GENERALITY",
+        "NEEDLESS_TRAIT_ABSTRACTION",
+        "CROSS_SUBSYSTEM_BLEED",
+        "MISSING_DATA_CONTRACT",
+        "PROSE_INSTEAD_OF_TYPES",
+        "MONOLITHIC_BATCH",
+        "UNJUSTIFIED_DEPENDENCY",
+        "SIDE_CHANNEL_HANDOFF",
+        "FORBIDDEN_SCOPE"
+      ]
+    },
+    "component_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "contract_note": {
+      "type": "string",
+      "minLength": 20
+    }
+  }
+}

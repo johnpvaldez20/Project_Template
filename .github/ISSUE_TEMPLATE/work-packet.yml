@@ -1,0 +1,112 @@
+# SPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER
+# SPDX-License-Identifier: LicenseRef-UNSET
+
+name: Work packet (Gate 1 input)
+description: Propose one atomic work packet. The gatekeeper answers with a Gate 1 payload.
+title: "PKT-NNNN: <imperative title>"
+labels: ["gate-1:pending"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One packet has its types written down. It can merge and revert alone.
+        Read docs/governance/GOVERNANCE_LINUS.md section 5 and section 16.
+        Cite one or more use case ids from docs/design/fixtures/use-cases.json.
+        Set the layer. Allowed files must sit under that layer.
+        Do not put an issue number or a base SHA in the packet JSON.
+        Record the issue on this form. The pull request records the base.
+        Open the pull request early so CI can record the red run.
+  - type: input
+    id: packet_id
+    attributes:
+      label: Packet id
+      description: Use the prefix from .governance/project.json.
+      placeholder: PKT-0014
+    validations:
+      required: true
+  - type: input
+    id: use_cases
+    attributes:
+      label: Use cases
+      description: Comma-separated ids from the use-case catalog. Example UC-01.
+      placeholder: UC-01
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer
+      description: Allowed files must sit under this layer. Paths are in .governance/project.json.
+      options:
+        - domain
+        - application
+        - presentation
+        - infrastructure
+    validations:
+      required: true
+  - type: input
+    id: state_machines
+    attributes:
+      label: State machines
+      description: Entity names from the state-machine catalog. Leave empty when the packet owns none.
+      placeholder: Item
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What the packet delivers and what it leaves out.
+    validations:
+      required: true
+  - type: textarea
+    id: definitions
+    attributes:
+      label: Data contracts
+      description: The real types, schema, or config text. Bodies are the coder's job.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Allowed files
+      description: Files, or directories that end with a slash. No globs. Stay inside the layer.
+      placeholder: |
+        src/domain/item.md
+    validations:
+      required: true
+  - type: input
+    id: depends
+    attributes:
+      label: Depends on packets
+      placeholder: PKT-0001
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification plan
+      description: Commands and each regression test with its assertion. Include each constraint test and each transition test.
+    validations:
+      required: true
+  - type: dropdown
+    id: lane
+    attributes:
+      label: Proposed lane
+      options:
+        - CLOUD (no local-only capability)
+        - LOCAL (needs a capability from lane.local_only_requires)
+        - EITHER (small and fully specified)
+    validations:
+      required: true
+  - type: textarea
+    id: contract_notes
+    attributes:
+      label: Contract notes
+      description: State any public contract change. A breaking change needs a migration.
+    validations:
+      required: true
+  - type: textarea
+    id: provenance
+    attributes:
+      label: Planner provenance
+      description: agent_id, role, runtime, host, model, and tool.
+      render: json
+    validations:
+      required: true

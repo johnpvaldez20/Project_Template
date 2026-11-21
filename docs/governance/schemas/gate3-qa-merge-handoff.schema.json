@@ -1,0 +1,383 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/governance/schemas/gate3-qa-merge-handoff.schema.json",
+  "title": "Gate3QaMergeHandoff",
+  "description": "Gate 3 verdict. The gatekeeper posts it as a pull request review. A MERGE_APPROVED is followed by a squash merge. Only the gatekeeper merges.",
+  "type": "object",
+  "required": [
+    "gate",
+    "packet_id",
+    "provenance",
+    "github",
+    "handoff_artifact",
+    "gate2_verdict_url",
+    "verdict",
+    "ci_evidence",
+    "local_runs",
+    "isolation_telemetry",
+    "test_integrity_audit",
+    "coverage",
+    "blocking_defects"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "gate": { "type": "string", "const": "G3_QA_MERGE" },
+    "packet_id": { "$ref": "common.schema.json#/$defs/packet_id" },
+    "provenance": { "$ref": "common.schema.json#/$defs/provenance" },
+    "github": {
+      "$ref": "common.schema.json#/$defs/github",
+      "required": ["repository", "branch", "pr_number", "head_sha", "merge_base_is_main_head"]
+    },
+    "handoff_artifact": {
+      "$ref": "common.schema.json#/$defs/handoff_artifact",
+      "properties": { "kind": { "const": "PR_REVIEW" } }
+    },
+    "gate2_verdict_url": { "$ref": "common.schema.json#/$defs/github_url" },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "MERGE_APPROVED",
+        "REJECT_TO_CODING",
+        "REJECT_TEST_SABOTAGE",
+        "REJECT_STALE_BASE",
+        "REJECT_CI_MISSING"
+      ]
+    },
+    "ci_evidence": {
+      "type": "object",
+      "required": ["provider", "workflow", "head_sha", "conclusion"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "const": "GITHUB_ACTIONS" },
+        "workflow": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "integer", "minimum": 1 },
+        "run_url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$"
+        },
+        "head_sha": { "$ref": "common.schema.json#/$defs/sha40" },
+        "runner": { "type": "string" },
+        "conclusion": {
+          "type": "string",
+          "enum": ["SUCCESS", "FAILURE", "CANCELLED", "TIMED_OUT", "MISSING"]
+        },
+        "checks": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/step" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "conclusion": { "enum": ["SUCCESS", "FAILURE"] } } },
+          "then": { "required": ["run_id", "run_url", "checks"] },
+          "else": { "not": { "required": ["checks"] } }
+        }
+      ]
+    },
+    "local_runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["agent", "command", "exit_code", "advisory"],
+        "additionalProperties": false,
+        "properties": {
+          "agent": { "$ref": "common.schema.json#/$defs/agent" },
+          "command": { "$ref": "common.schema.json#/$defs/command" },
+          "exit_code": { "type": "integer" },
+          "tool_version": { "type": "string" },
+          "advisory": { "type": "boolean", "const": true },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "isolation_telemetry": {
+      "type": "object",
+      "required": [
+        "worker_lane_id",
+        "runtime",
+        "temp_dir_strategy",
+        "env_isolation",
+        "shared_state_pollution_detected"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "worker_lane_id": { "type": "string", "pattern": "^(local|cloud)-lane-[0-9]{2}$" },
+        "runtime": { "$ref": "common.schema.json#/$defs/runtime" },
+        "temp_dir_strategy": {
+          "type": "string",
+          "enum": ["TEMPDIR_PER_TEST", "SHARED_FIXED_PATH", "NONE_NEEDED"]
+        },
+        "env_isolation": {
+          "type": "object",
+          "required": ["home_overridden", "target_dir_isolated", "network_disabled"],
+          "additionalProperties": false,
+          "properties": {
+            "home_overridden": { "type": "boolean" },
+            "target_dir_isolated": { "type": "boolean" },
+            "network_disabled": { "type": "boolean" }
+          }
+        },
+        "shared_state_pollution_detected": { "type": "boolean" }
+      }
+    },
+    "test_integrity_audit": {
+      "type": "object",
+      "required": [
+        "existing_assertions_weakened",
+        "skips_or_ignores_added",
+        "core_state_mocked_out",
+        "deterministic_fixtures_used",
+        "regression_test"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "existing_assertions_weakened": { "type": "boolean" },
+        "skips_or_ignores_added": { "type": "boolean" },
+        "core_state_mocked_out": { "type": "boolean" },
+        "deterministic_fixtures_used": { "type": "boolean" },
+        "regression_test": {
+          "type": "object",
+          "required": ["required", "reproduces_failure_without_patch"],
+          "additionalProperties": false,
+          "properties": {
+            "required": { "type": "boolean" },
+            "name": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*$"
+            },
+            "red_run": { "$ref": "#/$defs/evidence_run" },
+            "green_run": { "$ref": "#/$defs/evidence_run" },
+            "reproduces_failure_without_patch": { "type": "boolean" }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "required": { "const": true } }, "required": ["required"] },
+              "then": { "required": ["name"] }
+            },
+            {
+              "if": {
+                "properties": { "reproduces_failure_without_patch": { "const": true } },
+                "required": ["reproduces_failure_without_patch"]
+              },
+              "then": {
+                "required": ["red_run", "green_run"],
+                "properties": {
+                  "red_run": { "properties": { "exit_code": { "not": { "const": 0 } } } },
+                  "green_run": { "properties": { "exit_code": { "const": 0 } } }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["tool", "line_percentage", "scope"],
+      "additionalProperties": false,
+      "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "line_percentage": { "type": "number", "minimum": 0, "maximum": 100 },
+        "scope": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/component_name" }
+        },
+        "waiver": {
+          "type": "object",
+          "required": ["granted", "reason"],
+          "additionalProperties": false,
+          "properties": {
+            "granted": { "type": "boolean" },
+            "reason": { "type": "string", "minLength": 30 }
+          }
+        }
+      }
+    },
+    "blocking_defects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "TEST_SABOTAGE",
+              "ASSERTION_REMOVAL",
+              "SKIP_ADDED",
+              "MOCKED_CORE_STATE",
+              "NONDETERMINISTIC_TEST",
+              "SHARED_STATE_POLLUTION",
+              "CI_RED",
+              "CI_MISSING",
+              "CI_SHA_MISMATCH",
+              "STALE_BASE",
+              "COVERAGE_BELOW_FLOOR",
+              "REGRESSION_TEST_MISSING",
+              "REGRESSION_TEST_NOT_RED",
+              "LOCAL_RUN_ONLY",
+              "REVERT_ORDERED"
+            ]
+          },
+          "message": { "type": "string", "minLength": 20 },
+          "location": { "type": "string" }
+        }
+      }
+    },
+    "merge": {
+      "type": "object",
+      "required": ["method", "merged_by"],
+      "additionalProperties": false,
+      "properties": {
+        "method": { "type": "string", "const": "SQUASH" },
+        "merged_by": {
+          "$ref": "common.schema.json#/$defs/agent",
+          "properties": { "role": { "enum": ["GATEKEEPER", "OWNER"] } }
+        },
+        "merge_commit_sha": { "$ref": "common.schema.json#/$defs/sha40" }
+      }
+    }
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "required": ["command", "exit_code"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "$ref": "common.schema.json#/$defs/command" },
+        "exit_code": { "type": "integer" },
+        "total_tests": { "type": "integer", "minimum": 0 },
+        "failed_tests": { "type": "integer", "minimum": 0 },
+        "ignored_tests": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "evidence_run": {
+      "type": "object",
+      "required": ["head_sha", "command", "exit_code", "run_url"],
+      "additionalProperties": false,
+      "properties": {
+        "head_sha": { "$ref": "common.schema.json#/$defs/sha40" },
+        "command": { "$ref": "common.schema.json#/$defs/command" },
+        "exit_code": { "type": "integer" },
+        "run_url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "verdict": { "const": "MERGE_APPROVED" } }, "required": ["verdict"] },
+      "then": {
+        "required": ["merge"],
+        "properties": {
+          "github": { "properties": { "merge_base_is_main_head": { "const": true } } },
+          "ci_evidence": {
+            "required": ["run_id", "run_url"],
+            "properties": { "conclusion": { "const": "SUCCESS" } }
+          },
+          "isolation_telemetry": {
+            "properties": {
+              "temp_dir_strategy": { "enum": ["TEMPDIR_PER_TEST", "NONE_NEEDED"] },
+              "env_isolation": {
+                "properties": {
+                  "home_overridden": { "const": true },
+                  "network_disabled": { "const": true }
+                }
+              },
+              "shared_state_pollution_detected": { "const": false }
+            }
+          },
+          "test_integrity_audit": {
+            "properties": {
+              "existing_assertions_weakened": { "const": false },
+              "skips_or_ignores_added": { "const": false },
+              "core_state_mocked_out": { "const": false },
+              "deterministic_fixtures_used": { "const": true },
+              "regression_test": {
+                "if": { "properties": { "required": { "const": true } }, "required": ["required"] },
+                "then": {
+                  "properties": { "reproduces_failure_without_patch": { "const": true } }
+                }
+              }
+            }
+          },
+          "blocking_defects": { "maxItems": 0 }
+        }
+      },
+      "else": {
+        "properties": { "blocking_defects": { "minItems": 1 } },
+        "not": { "required": ["merge"] }
+      }
+    },
+    {
+      "if": {
+        "properties": { "verdict": { "const": "REJECT_TEST_SABOTAGE" } },
+        "required": ["verdict"]
+      },
+      "then": {
+        "properties": {
+          "test_integrity_audit": {
+            "anyOf": [
+              { "properties": { "existing_assertions_weakened": { "const": true } } },
+              { "properties": { "skips_or_ignores_added": { "const": true } } },
+              { "properties": { "core_state_mocked_out": { "const": true } } }
+            ]
+          },
+          "blocking_defects": {
+            "contains": {
+              "type": "object",
+              "required": ["code"],
+              "properties": {
+                "code": {
+                  "enum": ["TEST_SABOTAGE", "ASSERTION_REMOVAL", "SKIP_ADDED", "MOCKED_CORE_STATE"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "verdict": { "const": "REJECT_STALE_BASE" } },
+        "required": ["verdict"]
+      },
+      "then": {
+        "properties": {
+          "github": { "properties": { "merge_base_is_main_head": { "const": false } } },
+          "blocking_defects": {
+            "contains": {
+              "type": "object",
+              "required": ["code"],
+              "properties": { "code": { "const": "STALE_BASE" } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "verdict": { "const": "REJECT_CI_MISSING" } },
+        "required": ["verdict"]
+      },
+      "then": {
+        "properties": {
+          "ci_evidence": { "properties": { "conclusion": { "const": "MISSING" } } },
+          "blocking_defects": {
+            "contains": {
+              "type": "object",
+              "required": ["code"],
+              "properties": {
+                "code": { "enum": ["CI_MISSING", "CI_SHA_MISMATCH", "LOCAL_RUN_ONLY"] }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "use_cases": [
+    {
+      "id": "UC-01",
+      "title": "Save one item",
+      "trigger": "A client asks to save one item.",
+      "flow": "The domain checks the fields. The domain stores the item. The domain returns the id.",
+      "constraint": "A saved item has an id.",
+      "constraint_test": "item_id_present_after_save"
+    }
+  ]
+}

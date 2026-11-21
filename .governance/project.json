@@ -1,0 +1,108 @@
+{
+  "schema_version": "1.0.0",
+  "project": {
+    "name": "PROJECT-NAME",
+    "full_name": "Replace with the full project name",
+    "version": "0.0.0",
+    "repository": "replace-me/project",
+    "owner_login": "replace-me"
+  },
+  "packet": {
+    "id_prefix": "PKT"
+  },
+  "spdx": {
+    "license_id": "LicenseRef-UNSET",
+    "copyright_line": "SPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER",
+    "extensions": [".py", ".yml", ".yaml", ".md"],
+    "basenames": ["CODEOWNERS", ".gitignore"],
+    "exempt_basenames": ["LICENSE"]
+  },
+  "scope": {
+    "allowed_top_level": [
+      ".github",
+      ".gitignore",
+      ".governance",
+      "CODEOWNERS",
+      "LICENSE",
+      "LICENSES",
+      "README.md",
+      "docs",
+      "src",
+      "tools"
+    ],
+    "protected_path_patterns": [
+      "^docs/governance/",
+      "^\\.github/",
+      "^\\.governance/",
+      "^CODEOWNERS$",
+      "^LICENSE$",
+      "^LICENSES/"
+    ],
+    "amendment_path_patterns": [
+      "^docs/design/packets/"
+    ]
+  },
+  "verification": {
+    "command_prefixes": ["python3 ", "git "]
+  },
+  "lane": {
+    "local_only_requires": [
+      "OWNER_EYES",
+      "PHYSICAL_DEVICE",
+      "DISPLAY",
+      "SPECIALIZED_HARDWARE"
+    ]
+  },
+  "hosts": {
+    "local_kinds": ["OWNER_MACHINE"],
+    "cloud_kinds": ["CURSOR_CLOUD"],
+    "ci_kinds": ["GITHUB_ACTIONS"]
+  },
+  "ci": {
+    "workflow_file": "ci.yml",
+    "job_name": "gate",
+    "required_checks": ["gatecheck", "test", "spdx"],
+    "test_check": "test",
+    "check_commands": {
+      "gatecheck": "python3 tools/gatecheck/gatecheck.py",
+      "test": "python3 -m unittest discover -s tools/gatecheck -v",
+      "spdx": "python3 tools/gatecheck/gatecheck.py --spdx-only"
+    }
+  },
+  "toolchain": {
+    "language": "undecided",
+    "pin_file": null
+  },
+  "policy": {
+    "max_cyclomatic_complexity": 10,
+    "coverage_floor_percent": 85,
+    "forbidden_constructs": []
+  },
+  "gatekeeper": {
+    "persona_id": "overseer-linus-v1",
+    "agent_id_pattern": "^(overseer-linus-v[0-9]+|owner-[a-z0-9-]+)$"
+  },
+  "architecture": {
+    "document": "docs/design/ARCHITECTURE.md",
+    "use_case_catalog": "docs/design/fixtures/use-cases.json",
+    "state_machines": "docs/design/fixtures/state-machines.json",
+    "change_paths": [
+      "docs/design/ARCHITECTURE.md",
+      "docs/design/fixtures/"
+    ],
+    "layers": {
+      "presentation": ["src/presentation/"],
+      "application": ["src/application/"],
+      "domain": ["src/domain/"],
+      "infrastructure": ["src/infrastructure/"]
+    },
+    "layer_exempt_prefixes": [
+      "docs/design/",
+      "docs/governance/",
+      ".github/",
+      ".governance/",
+      "tools/gatecheck/",
+      "LICENSES/"
+    ]
+  }
+}

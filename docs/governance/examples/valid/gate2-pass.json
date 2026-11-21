@@ -1,0 +1,84 @@
+{
+  "gate": "G2_CODING",
+  "packet_id": "{{packet:0003}}",
+  "provenance": {
+    "schema_version": "1.0.0",
+    "produced_at": "2026-10-31T18:00:00Z",
+    "author": {
+      "agent_id": "overseer-linus-v1",
+      "role": "GATEKEEPER",
+      "runtime": "LOCAL",
+      "host": {
+        "kind": "OWNER_MACHINE",
+        "name": "worker-host",
+        "arch": "x86_64"
+      },
+      "model": {
+        "provider": "HUMAN",
+        "name": "gatekeeper",
+        "settings": {
+          "reasoning_effort": "high"
+        }
+      },
+      "tool": {
+        "name": "GH_CLI"
+      }
+    },
+    "worker": {
+      "agent_id": "cursor-cloud-coder-01",
+      "role": "CODER",
+      "runtime": "CLOUD",
+      "host": {
+        "kind": "CURSOR_CLOUD",
+        "name": "worker-host",
+        "arch": "x86_64"
+      },
+      "model": {
+        "provider": "XAI",
+        "name": "grok-4.7",
+        "settings": {
+          "reasoning_effort": "high"
+        }
+      },
+      "tool": {
+        "name": "CURSOR_CLOUD_AGENT"
+      }
+    }
+  },
+  "github": {
+    "repository": "{{repository}}",
+    "branch": "pkt/{{packet:0003}}-scope-review",
+    "pr_number": 21,
+    "head_sha": "5e6d7c8b9a0f1e2d3c4b5a697887766554433221",
+    "merge_base_is_main_head": true
+  },
+  "handoff_artifact": {
+    "kind": "PR_REVIEW",
+    "url": "{{github_base}}/pull/21#pullrequestreview-3300000021"
+  },
+  "gate1_verdict_url": "{{github_base}}/issues/3#issuecomment-3100000003",
+  "verdict": "PASS",
+  "toolchain": {
+    "language": "undecided",
+    "version": "undecided",
+    "matches_pin": true
+  },
+  "diff_hygiene": {
+    "files_modified": [
+      "docs/design/item.md"
+    ],
+    "out_of_scope_files": [],
+    "contains_unrelated_formatting": false,
+    "touches_protected_paths": false,
+    "dependencies_added": [],
+    "forbidden_constructs_added": 0,
+    "commits_in_pr": 2
+  },
+  "taste_metrics": {
+    "max_cyclomatic_complexity": 3,
+    "special_case_branches_eliminated": true,
+    "silent_error_swallowing_detected": false
+  },
+  "violations": [],
+  "overseer_critique": "The record matches the contract. No extra branch was added."
+}
