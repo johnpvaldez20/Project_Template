@@ -479,6 +479,10 @@ This document, the schemas, the examples, the project file, the workflows, the r
 The owner approves that pull request.
 `tools/gatecheck/` is a protected path.
 The checker fails when the project file does not protect each of these paths.
+
+CI runs the checker and the workflow of the pull request itself.
+A worker packet that changes them fails the `scope` check.
+The code owner review on the host is the last control on such a change.
 A schema change ships with updated examples.
 The checker fails when they drift.
 Bump `provenance.schema_version` when an old valid payload becomes invalid.
