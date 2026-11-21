@@ -57,6 +57,12 @@ class SignerTest(repo_fixture.ExampleCase):
         payload["provenance"]["author"]["role"] = "QA"
         self.assert_rejected(payload, "$/provenance/author/role: value is not in enum")
 
+    def test_worker_that_writes_a_verdict_gets_a_clear_message(self):
+        payload = self.example("gate1-pass")
+        payload["provenance"]["author"] = copy.deepcopy(payload["provenance"]["worker"])
+        self.assert_rejected(payload, "Ask the gatekeeper for the verdict.")
+        self.assert_rejected(payload, "author is the worker")
+
     def test_coder_cannot_approve_its_own_gate3(self):
         payload = self.example("gate3-merge-approved")
         payload["provenance"]["worker"]["role"] = "CODER"

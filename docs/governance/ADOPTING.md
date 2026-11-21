@@ -70,6 +70,9 @@ You choose the SPDX id. Put the text in `LICENSES/`.
 
 Keep the patterns that protect the gate documents, the workflows, the project file, `CODEOWNERS`, and `tools/gatecheck/`.
 The checker fails when one of them is not protected.
+The pin file in `toolchain.pin_file` is also a protected path.
+You can add the dependency manifest and the lock file to the protected patterns.
+A new dependency is then a gatekeeper packet. A worker packet cannot add it.
 Add each ignore rule of the product to `.gitignore`.
 A file that Git ignores does not count as a top-level name.
 

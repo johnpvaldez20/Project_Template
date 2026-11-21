@@ -20,6 +20,31 @@ import repofiles
 import schema_validate
 
 
+class ReportTest(unittest.TestCase):
+    def test_report_lists_passes_and_facts_before_failures(self):
+        report = gatecheck.Report()
+        report.fail("second rule is broken")
+        report.pass_("first rule holds")
+        report.info("head_sha " + "a" * 40)
+        self.assertEqual(
+            str(report).splitlines(),
+            [
+                "ok    first rule holds",
+                "info  head_sha " + "a" * 40,
+                "FAIL  second rule is broken",
+                "1 passed, 1 failed",
+            ],
+        )
+        self.assertFalse(report.is_clean())
+
+    def test_record_adds_the_pass_line_only_for_an_empty_list(self):
+        report = gatecheck.Report()
+        report.record([], "rule holds")
+        report.record(["broken"], "other rule holds")
+        self.assertEqual(report.passed, ["rule holds"])
+        self.assertEqual(report.failures, ["broken"])
+
+
 class PathsOverlapTest(unittest.TestCase):
     def test_identical_paths_overlap(self):
         self.assertTrue(gatecheck.paths_overlap("docs/design/a.md", "docs/design/a.md"))

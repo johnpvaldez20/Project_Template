@@ -381,6 +381,7 @@ A Gate 2 payload records `toolchain.language`, `toolchain.version`, and `toolcha
 PASS requires `matches_pin` true.
 A pin change touches the pin file only.
 It is a gatekeeper packet.
+The checker treats the pin file as a protected path.
 CI stays green.
 Merge it alone.
 

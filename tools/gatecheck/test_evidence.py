@@ -96,6 +96,7 @@ class PullRequestTest(GitRepoCase):
         self.commit("main moves")
         self.git("checkout", "-q", BRANCH)
         self.assert_pr_fails("STALE_BASE")
+        self.assertIn("merge_base_is_main_head false", self.check().facts)
 
     def test_file_outside_the_packet_scope_fails(self):
         self.git("checkout", "-q", "-b", BRANCH)
@@ -200,6 +201,12 @@ class PullRequestTest(GitRepoCase):
         report = self.check()
         self.assertTrue(report.is_clean(), str(report))
         self.assertTrue(any("is not a packet branch" in line for line in report.facts))
+
+    def test_packet_branch_with_a_wrong_name_fails(self):
+        self.git("checkout", "-q", "-b", "pkt/item-record")
+        self.write("src/domain/item.md")
+        self.commit("add the item record")
+        self.assert_pr_fails("branch pkt/item-record starts with pkt/ but does not name a packet")
 
     def test_missing_base_ref_fails(self):
         report = gatecheck.check_pull_request(self.root, None, None, env={})

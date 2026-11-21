@@ -42,7 +42,7 @@ Do not put it in `CODEOWNERS`.
 
 ```text
 gh repo edit OWNER/REPO --enable-merge-commit=false --enable-rebase-merge=false --enable-squash-merge --delete-branch-on-merge --enable-auto-merge=false
-gh api --method PATCH repos/OWNER/REPO -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY
+gh api --method PATCH repos/OWNER/REPO -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=BLANK
 ```
 
 The title of a packet pull request starts with the packet id.

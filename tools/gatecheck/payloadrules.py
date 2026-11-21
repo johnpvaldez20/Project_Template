@@ -185,11 +185,17 @@ def _named_agents(payload: dict) -> dict[str, dict]:
 
 
 def _separation_errors(agents: dict[str, dict]) -> list[str]:
+    errors: list[str] = []
+    author = agents.get("author", {})
+    if "role" in author and author["role"] not in PRIVILEGED_ROLES:
+        errors.append(
+            "the author of a gate verdict must be a GATEKEEPER or an OWNER. "
+            "A worker does not write a verdict. Ask the gatekeeper for the verdict."
+        )
     worker_id = agents.get("worker", {}).get("agent_id")
     if not isinstance(worker_id, str):
-        return []
-    errors: list[str] = []
-    if agents.get("author", {}).get("agent_id") == worker_id:
+        return errors
+    if author.get("agent_id") == worker_id:
         errors.append("author is the worker; a worker does not sign its own gate")
     if agents.get("merged_by", {}).get("agent_id") == worker_id:
         errors.append("merged_by is the worker; a worker does not merge")

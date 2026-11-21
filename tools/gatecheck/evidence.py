@@ -103,9 +103,9 @@ def _resolve(root: Path, ref: str) -> str:
 
 
 def _check_fresh(found: Findings, base_ref: str, base: str, merge_base: str) -> None:
-    if merge_base == base:
-        found.fact("merge_base_is_main_head true")
-    else:
+    fresh = merge_base == base
+    found.fact(f"merge_base_is_main_head {'true' if fresh else 'false'}")
+    if not fresh:
         found.error(
             f"STALE_BASE: the merge base {merge_base} is not the head of {base_ref}. "
             "Rebase the branch and push it."
@@ -127,6 +127,12 @@ def _check_branch(
     protected: list[str],
 ) -> None:
     packet_id = _packet_id(branch, project)
+    if packet_id is None and branch.startswith("pkt/"):
+        found.error(
+            f"branch {branch} starts with pkt/ but does not name a packet. "
+            "Use pkt/<packet id>-<slug> with lower-case letters, digits, and hyphens."
+        )
+        return
     if packet_id is None:
         found.fact(
             f"branch {branch} is not a packet branch. The packet scope rules do not apply. "
