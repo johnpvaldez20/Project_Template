@@ -96,19 +96,23 @@ def _ci_errors(project: dict) -> list[str]:
     ]
     if ci["test_check"] not in ci["required_checks"]:
         errors.append("ci.test_check must be one of ci.required_checks")
-    prefixes = project["verification"]["command_prefixes"]
-    for name, command in ci["check_commands"].items():
-        if not any(command.startswith(prefix) for prefix in prefixes):
-            errors.append(
-                f"ci.check_commands.{name} does not start with a prefix in verification.command_prefixes"
-            )
+    errors.extend(_command_prefix_errors(project))
     gatekeeper = project["gatekeeper"]
     if re.fullmatch(gatekeeper["agent_id_pattern"], gatekeeper["persona_id"]) is None:
         errors.append("gatekeeper.persona_id does not match gatekeeper.agent_id_pattern")
-    reports = list(ci["evidence"].values())
-    if any(item is None for item in reports) and any(item is not None for item in reports):
+    reports = [item is None for item in ci["evidence"].values()]
+    if any(reports) and not all(reports):
         errors.append("ci.evidence must name the test report and the coverage report, or no report")
     return errors
+
+
+def _command_prefix_errors(project: dict) -> list[str]:
+    prefixes = project["verification"]["command_prefixes"]
+    return [
+        f"ci.check_commands.{name} does not start with a prefix in verification.command_prefixes"
+        for name, command in project["ci"]["check_commands"].items()
+        if not any(command.startswith(prefix) for prefix in prefixes)
+    ]
 
 
 def _layer_errors(project: dict) -> list[str]:

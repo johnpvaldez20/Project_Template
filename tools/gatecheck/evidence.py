@@ -59,25 +59,35 @@ def pull_request(
     env = os.environ if env is None else env
     found = Findings()
     try:
-        base_ref = base_ref or _default_base(env)
-        branch = branch or env.get("GITHUB_HEAD_REF") or _git(root, "rev-parse", "--abbrev-ref", "HEAD")
-        head = _git(root, "rev-parse", "HEAD")
-        base = _resolve(root, base_ref)
-        merge_base = _git(root, "merge-base", head, base)
-        found.fact(f"head_sha {head}")
-        found.fact(f"base_sha {base} ({base_ref})")
-        _check_fresh(found, base_ref, base, merge_base)
-        changed = _changed_files(root, merge_base, head)
-        protected = [path for path in changed if projectfile.path_is_protected(path, project)]
-        found.fact(f"commits_in_pr {_git(root, 'rev-list', '--count', f'{merge_base}..{head}')}")
-        found.fact(f"files_modified {len(changed)}")
-        for path in changed:
-            found.fact(f"modified {path}" + (" (protected)" if path in protected else ""))
-        found.fact(f"touches_protected_paths {'true' if protected else 'false'}")
-        _check_branch(found, root, project, branch, merge_base, changed, protected)
+        _measure(found, root, project, base_ref or _default_base(env), branch, env)
     except GitError as exc:
         found.error(str(exc))
     return found
+
+
+def _measure(
+    found: Findings,
+    root: Path,
+    project: dict,
+    base_ref: str,
+    branch: str | None,
+    env: Mapping[str, str],
+) -> None:
+    branch = branch or env.get("GITHUB_HEAD_REF") or _git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    head = _git(root, "rev-parse", "HEAD")
+    base = _resolve(root, base_ref)
+    merge_base = _git(root, "merge-base", head, base)
+    found.fact(f"head_sha {head}")
+    found.fact(f"base_sha {base} ({base_ref})")
+    _check_fresh(found, base_ref, base, merge_base)
+    changed = _changed_files(root, merge_base, head)
+    protected = [path for path in changed if projectfile.path_is_protected(path, project)]
+    found.fact(f"commits_in_pr {_git(root, 'rev-list', '--count', f'{merge_base}..{head}')}")
+    found.fact(f"files_modified {len(changed)}")
+    for path in changed:
+        found.fact(f"modified {path}" + (" (protected)" if path in protected else ""))
+    found.fact(f"touches_protected_paths {'true' if protected else 'false'}")
+    _check_branch(found, root, project, branch, merge_base, changed, protected)
 
 
 def _default_base(env: Mapping[str, str]) -> str:
@@ -180,14 +190,18 @@ def _check_scope(
         for path in protected:
             found.error(f"PROTECTED_PATH: {path} needs a packet with gatekeeper_packet true")
     if packet.get("architecture_change") is not True:
-        for path in changed:
-            if any(_under(path, prefix) for prefix in project["architecture"]["change_paths"]):
-                found.error(
-                    f"{path} is an architecture path. It needs its own packet "
-                    "with architecture_change true."
-                )
+        for path in _architecture_paths(changed, project):
+            found.error(
+                f"{path} is an architecture path. It needs its own packet "
+                "with architecture_change true."
+            )
     if not outside:
         found.fact(f"each modified file is in the allowed_files of {packet_id}")
+
+
+def _architecture_paths(changed: list[str], project: dict) -> list[str]:
+    prefixes = project["architecture"]["change_paths"]
+    return [path for path in changed if any(_under(path, prefix) for prefix in prefixes)]
 
 
 def _check_planned_tests(found: Findings, root: Path, packet_id: str, packet: dict) -> None:

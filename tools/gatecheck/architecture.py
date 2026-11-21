@@ -94,30 +94,35 @@ def import_errors(root: Path, files: list[str], project: dict) -> tuple[list[str
     scanners = {
         suffix.lower(): scanner for scanner in rules["scanners"] for suffix in scanner["extensions"]
     }
-    non_source = {item.lower() for item in rules["non_source_extensions"]}
-    exempt = arch["layer_exempt_prefixes"]
     errors: list[str] = []
     scanned = 0
     for path in files:
-        if _matches_any(path, exempt):
+        if _matches_any(path, arch["layer_exempt_prefixes"]):
             continue
-        suffix = PurePosixPath(path).suffix.lower()
-        scanner = scanners.get(suffix)
+        scanner = scanners.get(PurePosixPath(path).suffix.lower())
         layer = importscan.layer_of(path, arch["layers"])
-        if layer is None and scanner is not None:
-            errors.append(
-                f"{path}: source file is outside every layer. "
-                "Move it into a layer, or add it to layer_exempt_prefixes."
-            )
-        elif layer is not None and scanner is None and suffix not in non_source:
-            errors.append(
-                f"{path}: no scanner reads this file type. "
-                "Add a scanner, or add the suffix to non_source_extensions."
-            )
-        elif layer is not None and scanner is not None:
+        if layer is not None and scanner is not None:
             scanned += 1
             errors.extend(_file_import_errors(root, path, layer, scanner, arch))
+        else:
+            errors.extend(_placement_errors(path, layer, scanner, rules))
     return errors, scanned
+
+
+def _placement_errors(path: str, layer: str | None, scanner: dict | None, rules: dict) -> list[str]:
+    """A source file needs a layer. A file in a layer needs a scanner."""
+    if layer is None and scanner is not None:
+        return [
+            f"{path}: source file is outside every layer. "
+            "Move it into a layer, or add it to layer_exempt_prefixes."
+        ]
+    non_source = {item.lower() for item in rules["non_source_extensions"]}
+    if layer is not None and PurePosixPath(path).suffix.lower() not in non_source:
+        return [
+            f"{path}: no scanner reads this file type. "
+            "Add a scanner, or add the suffix to non_source_extensions."
+        ]
+    return []
 
 
 def _file_import_errors(
@@ -399,24 +404,33 @@ def _parse_machine(index: int, row: Any) -> tuple[dict | None, list[str]]:
 
 
 def _machine_shape_errors(entity: str, row: dict) -> list[str]:
-    states = row.get("states")
     machine_id = row.get("id")
-    if machine_id is not None and (
-        not isinstance(machine_id, str) or _MACHINE_ID.fullmatch(machine_id) is None
-    ):
+    if machine_id is not None and not _is_machine_id(machine_id):
         return [f"{entity} id does not match SM-N"]
     if not isinstance(row.get("linear"), bool):
         return [f"{entity} linear must be a boolean"]
-    if not isinstance(states, list) or not all(isinstance(item, str) and item for item in states):
-        return [f"{entity} states must be a list of names"]
-    if len(states) != len(set(states)):
-        return [f"{entity} states are not unique"]
-    if row.get("initial") not in states:
-        return [f"{entity} initial state is not in the state list"]
+    problem = _state_list_error(entity, row)
+    if problem:
+        return [problem]
     transitions = row.get("transitions")
     if not isinstance(transitions, list) or not transitions:
         return [f"{entity} needs at least one transition"]
     return []
+
+
+def _is_machine_id(value: Any) -> bool:
+    return isinstance(value, str) and _MACHINE_ID.fullmatch(value) is not None
+
+
+def _state_list_error(entity: str, row: dict) -> str | None:
+    states = row.get("states")
+    if not isinstance(states, list) or not all(isinstance(item, str) and item for item in states):
+        return f"{entity} states must be a list of names"
+    if len(states) != len(set(states)):
+        return f"{entity} states are not unique"
+    if row.get("initial") not in states:
+        return f"{entity} initial state is not in the state list"
+    return None
 
 
 def _parse_edges(
@@ -445,19 +459,17 @@ def _parse_edge(entity: str, states: list[str], row: Any) -> tuple[str, dict[str
         return f"{entity} transition is not an object", None
     source = row.get("from")
     target = row.get("to")
-    test_name = row.get("test")
     if not isinstance(source, str) or source not in states:
         return f"{entity} transition leaves from an unknown state", None
     if not isinstance(target, str) or target not in states:
         return f"{entity} transition arrives at an unknown state", None
     if source == target:
         return f"{entity} transition {source} -> {target} does not move", None
+    test_name = row.get("test")
     if not isinstance(test_name, str) or _TEST_NAME.fullmatch(test_name) is None:
         return f"{entity} transition {source} -> {target} test name is invalid", None
     edge = {"from": source, "to": target, "test": test_name}
-    for key in ("event", "guard"):
-        if isinstance(row.get(key), str):
-            edge[key] = row[key]
+    edge.update({key: row[key] for key in ("event", "guard") if isinstance(row.get(key), str)})
     return "", edge
 
 
