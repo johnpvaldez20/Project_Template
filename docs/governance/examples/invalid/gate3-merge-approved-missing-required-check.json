@@ -69,6 +69,10 @@
       "gatecheck": {
         "command": "python3 tools/gatecheck/gatecheck.py",
         "exit_code": 0
+      },
+      "scope": {
+        "command": "python3 tools/gatecheck/gatecheck.py --pr",
+        "exit_code": 0
       }
     }
   },

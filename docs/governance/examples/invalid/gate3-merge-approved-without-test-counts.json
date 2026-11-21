@@ -78,6 +78,10 @@
       "spdx": {
         "command": "python3 tools/gatecheck/gatecheck.py --spdx-only",
         "exit_code": 0
+      },
+      "scope": {
+        "command": "python3 tools/gatecheck/gatecheck.py --pr",
+        "exit_code": 0
       }
     }
   },

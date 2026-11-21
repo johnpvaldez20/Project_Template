@@ -58,6 +58,7 @@ Three rules follow.
 3. **Scope isolation.** A packet names `allowed_files` at Gate 1.
    The coder touches nothing else.
    A diff outside that list is `SCOPE_VIOLATION`.
+   CI compares the diff of a packet branch with the packet file.
    Correct the plan.
    Do not keep the extra edit on the old plan.
 4. **Test integrity.** A weakened assertion, a skip, an early return, a smaller case count, or a stub of the real subject is `TEST_SABOTAGE`.
@@ -71,6 +72,8 @@ Three rules follow.
    Every payload has `handoff_artifact.url` on that repository.
    The gate checker validates the payload before a person reads it.
 7. **Evidence.** The only pass evidence is a completed CI run on the exact head SHA.
+   CI checks out that SHA. CI does not cancel a run.
+   A verdict copies its numbers from that run. It does not estimate them.
    A local run is `local_runs[]` with `advisory` true.
    It has zero weight.
 8. **One toolchain.** The project file names the language and the optional pin file.
@@ -100,10 +103,32 @@ The coder does not QA that packet.
 The planner does not code that plan unless the Gate 1 verdict says so.
 
 Every payload names `provenance.author` and `provenance.worker`.
+The author is the agent that wrote the payload.
+The worker is the agent whose work the payload judges.
 Each actor has `agent_id`, `role`, `runtime`, `host`, `model`, and `tool`.
 The checker rejects an OLLAMA model that claims runtime CLOUD.
 The checker rejects a host kind that the project file does not allow for that runtime.
 The checker rejects a GATEKEEPER id that misses `gatekeeper.agent_id_pattern`.
+The checker rejects an OWNER id that misses `owner.agent_id_pattern`.
+
+A worker does not sign its own gate.
+On a Gate 1, Gate 2, or Gate 3 payload, the author has the role GATEKEEPER or OWNER.
+The author is not the worker.
+The merger on a Gate 3 payload is not the worker.
+The checker rejects a payload that breaks one of these rules.
+The Gate 3 worker is not the Gate 2 worker.
+The checker applies that rule when it gets the two payloads together.
+
+On a gatekeeper packet, the gatekeeper is the worker. The owner signs those verdicts.
+On an architecture packet, the owner is the worker. The gatekeeper signs those verdicts.
+
+A payload states who wrote it.
+The host records which account posted it.
+The gatekeeper account posts each verdict.
+A verdict that the worker account posted is not a verdict.
+The checker cannot see the host account.
+The gatekeeper compares the account with the payload before it accepts a verdict.
+Section 12 states the host rules that make two accounts necessary.
 
 ## 4. Handoff
 
@@ -133,6 +158,16 @@ Post a payload in this fence:
 The `gate` field selects the schema.
 A payload that does not validate is not a verdict.
 Post a valid payload again.
+
+Check a payload before you post it and after you read it.
+Save the payload, or the comment text, in a file.
+Run `python3 tools/gatecheck/gatecheck.py --payload <file>`.
+Give the payloads of one packet together. The checker compares them.
+A real payload contains no `{{` token.
+
+A worker does not write a gate verdict.
+A worker reports in the pull request body.
+The body follows `.github/PULL_REQUEST_TEMPLATE.md`.
 
 Lifecycle:
 
@@ -164,6 +199,7 @@ A plan passes only when all of these are true.
 3. `allowed_files` lists files or directories.
    A directory entry ends with `/`.
    Do not use globs.
+   A path has no empty segment, no `.` segment, and no `..` segment.
    `forbidden_paths` lists nearby paths the coder must not touch.
    The checker rejects overlapping scopes unless one packet depends on the other.
 4. `verification_plan` names the commands and the regression tests.
@@ -188,6 +224,12 @@ They are plans, not verdicts.
 A `READY` plan meets the same shape rules as a Gate 1 PASS.
 A `BLOCKED` plan names `blocked_on` and does not start coding.
 
+CI reads the packet file, not the Gate 1 comment.
+A Gate 1 PASS states the same scope as the packet file.
+The allowed files, the use cases, the layer, the state machines, and the test names are equal.
+The `--payload` check compares them.
+When they differ, amend the packet file first.
+
 ## 6. Gate 2
 
 The schema is `gate2-coding-handoff.schema.json`.
@@ -204,14 +246,19 @@ Gate 2 judges the diff from the pull request base to `head_sha`.
 5. Each new dependency has a justification of at least 30 characters.
    The word "convenient" is not a justification.
 6. `forbidden_constructs_added` is 0 on PASS.
-   The project file lists the constructs the project forbids.
+   The project file lists each construct with a pattern and its paths.
+   CI fails when a line in those paths matches.
 7. `merge_base_is_main_head` false cannot be PASS.
    The verdict is `REJECT_STALE_BASE`.
    Rebase, push, and run CI again.
 8. Complexity, special cases, and swallowed errors must meet the PASS rules.
-   The checker also enforces `policy.max_cyclomatic_complexity`.
-9. The reviewer checks the import list in section 16 before PASS.
-   CI checks layer paths. CI does not parse imports.
+   The limit is `policy.max_cyclomatic_complexity`.
+9. CI checks the import direction of each layer.
+   The reviewer checks the items in section 16 that CI cannot read.
+10. A modified protected path sets `touches_protected_paths` true.
+    The checker compares `files_modified` with the protected patterns.
+    Each file in `out_of_scope_files` is also in `files_modified`.
+11. Copy the head SHA, the base result, and the file list from the `scope` check of the CI run.
 
 `issue_number` and `base_sha` are optional on this verdict.
 Section 11 explains why.
@@ -232,15 +279,26 @@ Copy it into `ci_evidence`.
 `MERGE_APPROVED` needs conclusion `SUCCESS`.
 Every name in `ci.required_checks` is present with exit code 0.
 The check named by `ci.test_check` has `failed_tests` 0, `ignored_tests` 0, and `total_tests` at least 1.
+An approval records each of the three counters.
+A counter that is absent is not zero.
+`ci_evidence.run_url` ends with `ci_evidence.run_id`.
 `local_runs[]` stays advisory.
 The schema fixes `advisory` to true.
+
+A project with tests sets `ci.evidence` in the project file.
+The `--evidence` check then reads the test report and the coverage report in CI.
+It fails on a failed test, on an ignored test, and below the coverage floor.
+A skipped test and an expected failure are ignored tests.
+Copy the counters and the coverage from that check.
 
 ### 7.2 Regression test
 
 A behavior packet has one named test.
+The packet verification plan names that test.
 The red run fails on a commit without the change.
 The green run passes on `head_sha`.
 Both runs are CI URLs.
+The red run and the green run are two runs on two commits.
 `green_run.head_sha` equals `github.head_sha` on `MERGE_APPROVED`.
 A test that passes on both commits is `REGRESSION_TEST_NOT_RED`.
 A packet with no behavior sets `regression_test.required` false at Gate 1.
@@ -273,6 +331,7 @@ Tests in different lanes must not see each other.
 ### 7.5 Coverage
 
 Read the floor from `policy.coverage_floor_percent`.
+When `ci.evidence` names a coverage report, CI fails below the floor.
 A result below the floor needs `coverage.waiver.granted` true and a reason of at least 30 characters.
 The gatekeeper grants the waiver.
 A waiver is not the default.
@@ -306,6 +365,7 @@ The gatekeeper does not rebase a worker branch.
 The gatekeeper does not resolve a worker conflict.
 
 Overlapping `allowed_files` need `depends_on_packets`.
+A dependency through a third packet also orders two packets.
 The checker reads `docs/design/packets/`.
 The second packet waits until the first is `MERGED`.
 
@@ -341,6 +401,25 @@ The commands are `ci.check_commands`.
 The checker fails when the workflow omits a command or omits `pull_request`.
 The same job checks the architecture catalog from the project file.
 
+The workflow checks out the head SHA of the pull request.
+It does not test a merge commit.
+The workflow does not cancel a run.
+A cancelled run cannot be the red run.
+The `scope` check runs `python3 tools/gatecheck/gatecheck.py --pr`.
+It prints the head SHA, the base SHA, and the file list.
+It fails when the base branch moved.
+On a `pkt/` branch, it reads the packet file from the base commit.
+It fails on a file outside `allowed_files`.
+It fails on a protected path without a gatekeeper packet.
+It fails when a planned regression test is not in the tree.
+A branch with another name is not a packet branch.
+It gets no gate verdict. Only the owner merges it.
+
+Each action in a workflow is pinned to a full commit SHA.
+Each workflow has a `permissions` block.
+No workflow uses `pull_request_target`.
+The checker fails when a workflow breaks one of these rules.
+
 ## 11. Issues and base SHAs
 
 A file in `docs/design/packets/` is a plan.
@@ -362,28 +441,41 @@ The pull request base stays current on the host.
 
 ## 12. Branch protection
 
-`main` should require these settings.
+The ruleset for `main` is `.github/rulesets/main.json`.
+The host does not read that file.
+The owner imports it on the host. The steps are in `OWNER_SETUP.md`.
+The checker fails when the file does not agree with this list.
+
+`main` must require these settings.
 
 - A pull request before merge.
 - One approving review.
 - Stale reviews dismissed on push.
 - Review from the code owner in `CODEOWNERS`.
-- The status check named by `ci.job_name`.
+- Approval of the last push by an account that did not push it.
+- The status check named by `ci.job_name`, from the CI service only.
 - An up-to-date branch.
 - Linear history.
 - Squash merge only.
 - No force push.
 - No branch deletion.
-- The owner is the only pusher.
 
-`CODEOWNERS` must contain `@` plus `project.owner_login`.
-If the host plan cannot enforce protection, say that in the Gate 3 verdict.
+`CODEOWNERS` names `@` plus `project.owner_login` on each rule.
+One `CODEOWNERS` file exists. It is at the repository root.
+
+The host does not let the author of a pull request approve it.
+The worker account and the gatekeeper account must be two accounts.
+When one account does both jobs, the host cannot enforce Gate 3.
 The law is then discipline only.
+Say that in the Gate 3 verdict.
+If the host plan cannot enforce the ruleset, say that in the Gate 3 verdict also.
 
 ## 13. Amendments
 
-This document, the schemas, the examples, the project file, and the workflow change only by a gatekeeper pull request.
+This document, the schemas, the examples, the project file, the workflows, the ruleset file, and the gate checker change only by a gatekeeper pull request.
 The owner approves that pull request.
+`tools/gatecheck/` is a protected path.
+The checker fails when the project file does not protect each of these paths.
 A schema change ships with updated examples.
 The checker fails when they drift.
 Bump `provenance.schema_version` when an old valid payload becomes invalid.
@@ -406,6 +498,15 @@ It may not name another packet file.
 ## 15. Commands
 
 Run the commands in `ci.check_commands`.
+
+| Command | Use |
+|---|---|
+| `python3 tools/gatecheck/gatecheck.py` | Check the full repository. |
+| `python3 tools/gatecheck/architecture.py` | Check the catalog, the packets, and the import direction. |
+| `python3 tools/gatecheck/gatecheck.py --payload <file>` | Check one or more gate payloads. |
+| `python3 tools/gatecheck/gatecheck.py --pr` | Check the branch against its base before a push. |
+| `python3 tools/gatecheck/gatecheck.py --evidence` | Check the test report and the coverage report. |
+
 Use the host CLI to list the workflow run for the exact head SHA.
 Reset a rejected branch with a force-with-lease push of the base SHA to that branch.
 Squash-merge only after `MERGE_APPROVED` is posted.
@@ -439,26 +540,50 @@ The owner approves that change.
 
 A READY packet and a Gate 1 PASS set `layer`.
 The layer is a key in `architecture.layers`.
+A packet has one layer.
+A feature that needs two layers is two packets with `depends_on_packets`.
 Each allowed file is under that layer path.
 A path under `architecture.layer_exempt_prefixes` is exempt.
 The packet file for that packet is exempt.
 CI checks these paths.
-CI does not parse imports.
+
+`architecture.import_rules.allowed` states which layers each layer can import.
+A layer can always import itself.
+The map has no cycle.
+The default map is this list.
+
+- Presentation imports application and domain.
+- Application imports domain.
+- Domain imports no other layer.
+- Infrastructure imports application and domain.
+
+CI reads the imports of each source file in a layer.
+A scanner in the project file names the parser for each file suffix.
+A file in a layer must have a scanner, or its suffix must be in `non_source_extensions`.
+A source file must be in a layer or on an exempt path.
+Put the file that connects the layers on an exempt path.
+`import_rules.forbidden` can keep a named module out of one layer.
 
 The reviewer checks these items before Gate 2 PASS.
 
-1. An import stays in the packet layer.
-2. Domain code does not import presentation or infrastructure.
-3. Application code does not import presentation.
-4. Infrastructure does not own a use-case rule.
+1. Infrastructure does not own a use-case rule.
+2. An import with a computed name does not go around the import rules.
+3. A project with no scanner follows the map. The reviewer reads each import.
 
 ### 16.3 State machines
 
-A state machine lists states in order.
+A state machine lists its states.
 A linear machine moves only to the next state.
-A skip or a reverse step is a catalog error.
+A skip or a reverse step in a linear machine is a catalog error.
+A machine that is not linear lists each transition that it permits.
+Each state must be on a path from the initial state.
+A transition can name an event and a guard.
+A machine can list forbidden transitions.
+A forbidden transition is a move that the machine must reject.
 A packet that names a machine lists one regression test for each transition.
+It also lists one regression test for each forbidden transition.
 The test name is the `test` field on that transition.
+One test name is on one transition only.
 The example machine is `Item`.
 Its states are `draft`, then `active`, then `archived`.
 

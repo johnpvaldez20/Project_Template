@@ -30,3 +30,6 @@ Move a closed item from this list into a decision section above.
 - [ ] Choose the SPDX license id.
 - [ ] Replace the brackets in `ARCHITECTURE.md`.
 - [ ] Confirm the layer directories.
+- [ ] Confirm the import map in `architecture.import_rules`.
+- [ ] Choose the worker account and the gatekeeper account.
+- [ ] Do the host steps in `docs/governance/OWNER_SETUP.md`.
