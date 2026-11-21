@@ -2,22 +2,30 @@
 # SPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER
 # SPDX-License-Identifier: LicenseRef-UNSET
 
-"""Architecture catalog checks for packets and Gate 1 payloads.
+"""Architecture rules for packets, Gate 1 payloads, and source files.
 
-Project paths and layer directories live in .governance/project.json.
-This module does not name a product.
+Project paths, layer directories, and import rules live in
+.governance/project.json. This module does not name a product.
+
+Run this file to check the catalog, the packets, and the import direction:
+
+    python3 tools/gatecheck/architecture.py
 """
 
 from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+import sys
+from pathlib import Path, PurePosixPath
 from typing import Any
+
+import importscan
 
 _UC_ID = re.compile(r"^UC-[0-9]{2,}$")
 _TEST_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*$")
 _ENTITY = re.compile(r"^[A-Z][A-Za-z0-9]*$")
+_MACHINE_ID = re.compile(r"^SM-[0-9]{2,}$")
 _LAYER = re.compile(r"^[a-z][a-z0-9-]*$")
 
 
@@ -67,11 +75,81 @@ def coverage_errors(
             problems.append(f"use case {use_case} is not cited by a packet")
     for entity in sorted(machines):
         groups = declared.get(entity, [])
-        tests = [edge["test"] for edge in machines[entity]["transitions"]]
+        tests = machine_tests(machines[entity])
         covered = any(all(test in names for test in tests) for names in groups)
         if not covered:
             problems.append(f"state machine {entity} is not covered by a packet")
     return problems
+
+
+def import_errors(root: Path, files: list[str], project: dict) -> tuple[list[str], int]:
+    """Check the import direction of each source file in a layer.
+
+    Return the failure lines and the count of files that a scanner read.
+    A file in a layer must have a scanner, or its suffix must be a declared
+    non-source suffix. A source file must be in a layer or on an exempt path.
+    """
+    arch = project["architecture"]
+    rules = arch["import_rules"]
+    scanners = {
+        suffix.lower(): scanner for scanner in rules["scanners"] for suffix in scanner["extensions"]
+    }
+    errors: list[str] = []
+    scanned = 0
+    for path in files:
+        if _matches_any(path, arch["layer_exempt_prefixes"]):
+            continue
+        scanner = scanners.get(PurePosixPath(path).suffix.lower())
+        layer = importscan.layer_of(path, arch["layers"])
+        if layer is not None and scanner is not None:
+            scanned += 1
+            errors.extend(_file_import_errors(root, path, layer, scanner, arch))
+        else:
+            errors.extend(_placement_errors(path, layer, scanner, rules))
+    return errors, scanned
+
+
+def _placement_errors(path: str, layer: str | None, scanner: dict | None, rules: dict) -> list[str]:
+    """A source file needs a layer. A file in a layer needs a scanner."""
+    if layer is None and scanner is not None:
+        return [
+            f"{path}: source file is outside every layer. "
+            "Move it into a layer, or add it to layer_exempt_prefixes."
+        ]
+    non_source = {item.lower() for item in rules["non_source_extensions"]}
+    if layer is not None and PurePosixPath(path).suffix.lower() not in non_source:
+        return [
+            f"{path}: no scanner reads this file type. "
+            "Add a scanner, or add the suffix to non_source_extensions."
+        ]
+    return []
+
+
+def _file_import_errors(
+    root: Path, path: str, layer: str, scanner: dict, arch: dict
+) -> list[str]:
+    try:
+        source = (root / path).read_text(encoding="utf-8-sig")
+        found = importscan.scan(source, path, scanner, arch["layers"])
+    except UnicodeDecodeError:
+        return [f"{path}: cannot read the file as UTF-8"]
+    except SyntaxError as exc:
+        return [f"{path}: cannot parse the file: line {exc.lineno}: {exc.msg}"]
+    rules = arch["import_rules"]
+    allowed = set(rules["allowed"].get(layer, [])) | {layer}
+    forbidden = rules["forbidden"].get(layer, [])
+    errors: list[str] = []
+    reported: set[tuple[int, str]] = set()
+    for item in found:
+        for target in item.layers:
+            if target not in allowed and (item.line, target) not in reported:
+                reported.add((item.line, target))
+                errors.append(
+                    f"{path}:{item.line}: layer {layer} must not import layer {target} ({item.text})"
+                )
+        if any(re.search(pattern, item.text) for pattern in forbidden):
+            errors.append(f"{path}:{item.line}: layer {layer} must not import {item.text}")
+    return errors
 
 
 def load_catalog(root: Path | None, arch: dict) -> tuple[dict[str, dict], dict[str, dict], list[str]]:
@@ -208,10 +286,10 @@ def _transition_errors(payload: dict, machines: dict[str, dict], strict: bool) -
         if not isinstance(entity, str) or entity not in machines:
             errors.append(f"unknown state machine {entity}")
             continue
-        for edge in machines[entity]["transitions"]:
-            if edge["test"] not in names:
+        for test in machine_tests(machines[entity]):
+            if test not in names:
                 errors.append(
-                    f"verification plan is missing transition test {edge['test']} for {entity}"
+                    f"verification plan is missing transition test {test} for {entity}"
                 )
     return errors
 
@@ -271,82 +349,177 @@ def _parse_use_cases(document: Any) -> tuple[dict[str, dict], list[str]]:
     return catalog, errors
 
 
+def machine_tests(machine: dict) -> list[str]:
+    """Return the test names of each transition and each forbidden transition."""
+    edges = machine["transitions"] + machine.get("forbidden_transitions", [])
+    return [edge["test"] for edge in edges]
+
+
 def _parse_machines(document: Any) -> tuple[dict[str, dict], list[str]]:
-    errors: list[str] = []
     if not isinstance(document, dict) or not isinstance(document.get("machines"), list):
         return {}, ["state-machine catalog needs a machines list"]
     rows = document["machines"]
     if not rows:
         return {}, ["state-machine catalog needs at least one machine"]
     machines: dict[str, dict] = {}
+    errors: list[str] = []
+    ids: set[str] = set()
     for index, row in enumerate(rows):
-        if not isinstance(row, dict):
-            errors.append(f"state machine {index} is not an object")
+        machine, problems = _parse_machine(index, row)
+        errors.extend(problems)
+        if machine is None:
             continue
-        entity = row.get("entity")
-        if not isinstance(entity, str) or _ENTITY.fullmatch(entity) is None:
-            errors.append(f"state machine {index} entity is invalid")
-            continue
+        entity = machine["entity"]
+        machine_id = machine.get("id")
         if entity in machines:
             errors.append(f"duplicate state machine {entity}")
-            continue
-        states = row.get("states")
-        transitions = row.get("transitions")
-        if not isinstance(row.get("linear"), bool):
-            errors.append(f"{entity} linear must be a boolean")
-            continue
-        if not isinstance(states, list) or not all(isinstance(item, str) and item for item in states):
-            errors.append(f"{entity} states must be a list of names")
-            continue
-        if len(states) != len(set(states)):
-            errors.append(f"{entity} states are not unique")
-            continue
-        if row.get("initial") not in states:
-            errors.append(f"{entity} initial state is not in the state list")
-            continue
-        if not isinstance(transitions, list) or not transitions:
-            errors.append(f"{entity} needs at least one transition")
-            continue
-        edge_errors, edges = _parse_edges(entity, states, transitions)
-        errors.extend(edge_errors)
-        if edge_errors:
-            continue
-        machine = dict(row)
-        machine["transitions"] = edges
-        linear_problems = linear_errors(machine)
-        errors.extend(linear_problems)
-        if not linear_problems:
+        elif machine_id is not None and machine_id in ids:
+            errors.append(f"duplicate state machine id {machine_id}")
+        else:
             machines[entity] = machine
+            ids.add(machine_id)
     return machines, errors
+
+
+def _parse_machine(index: int, row: Any) -> tuple[dict | None, list[str]]:
+    if not isinstance(row, dict):
+        return None, [f"state machine {index} is not an object"]
+    entity = row.get("entity")
+    if not isinstance(entity, str) or _ENTITY.fullmatch(entity) is None:
+        return None, [f"state machine {index} entity is invalid"]
+    shape = _machine_shape_errors(entity, row)
+    if shape:
+        return None, shape
+    edge_errors, edges = _parse_edges(entity, row["states"], row["transitions"])
+    forbidden_errors, forbidden = _parse_forbidden(
+        entity, row["states"], edges, row.get("forbidden_transitions", [])
+    )
+    machine = dict(row)
+    machine["transitions"] = edges
+    machine["forbidden_transitions"] = forbidden
+    errors = edge_errors + forbidden_errors
+    if not errors:
+        errors = linear_errors(machine) + _reach_errors(machine) + _test_name_errors(machine)
+    return (None if errors else machine), errors
+
+
+def _machine_shape_errors(entity: str, row: dict) -> list[str]:
+    machine_id = row.get("id")
+    if machine_id is not None and not _is_machine_id(machine_id):
+        return [f"{entity} id does not match SM-N"]
+    if not isinstance(row.get("linear"), bool):
+        return [f"{entity} linear must be a boolean"]
+    problem = _state_list_error(entity, row)
+    if problem:
+        return [problem]
+    transitions = row.get("transitions")
+    if not isinstance(transitions, list) or not transitions:
+        return [f"{entity} needs at least one transition"]
+    return []
+
+
+def _is_machine_id(value: Any) -> bool:
+    return isinstance(value, str) and _MACHINE_ID.fullmatch(value) is not None
+
+
+def _state_list_error(entity: str, row: dict) -> str | None:
+    states = row.get("states")
+    if not isinstance(states, list) or not all(isinstance(item, str) and item for item in states):
+        return f"{entity} states must be a list of names"
+    if len(states) != len(set(states)):
+        return f"{entity} states are not unique"
+    if row.get("initial") not in states:
+        return f"{entity} initial state is not in the state list"
+    return None
 
 
 def _parse_edges(
     entity: str, states: list[str], transitions: list[Any]
 ) -> tuple[list[str], list[dict[str, str]]]:
-    known = set(states)
     errors: list[str] = []
     edges: list[dict[str, str]] = []
-    for edge in transitions:
-        if not isinstance(edge, dict):
-            errors.append(f"{entity} transition is not an object")
+    seen: set[tuple[str, str, str]] = set()
+    for row in transitions:
+        problem, edge = _parse_edge(entity, states, row)
+        if edge is None:
+            errors.append(problem)
             continue
-        source = edge.get("from")
-        target = edge.get("to")
-        test_name = edge.get("test")
-        if not isinstance(source, str) or source not in known:
-            errors.append(f"{entity} transition leaves from an unknown state")
+        key = (edge["from"], edge["to"], edge.get("event", ""))
+        if key in seen:
+            errors.append(f"{entity} transition {edge['from']} -> {edge['to']} is in the list twice")
             continue
-        if not isinstance(target, str) or target not in known:
-            errors.append(f"{entity} transition arrives at an unknown state")
-            continue
-        if source == target:
-            errors.append(f"{entity} transition {source} -> {target} does not move")
-            continue
-        if not isinstance(test_name, str) or _TEST_NAME.fullmatch(test_name) is None:
-            errors.append(f"{entity} transition {source} -> {target} test name is invalid")
-            continue
-        edges.append({"from": source, "to": target, "test": test_name})
+        seen.add(key)
+        edges.append(edge)
     return errors, edges
+
+
+def _parse_edge(entity: str, states: list[str], row: Any) -> tuple[str, dict[str, str] | None]:
+    """Return the problem text, or the edge when the row is correct."""
+    if not isinstance(row, dict):
+        return f"{entity} transition is not an object", None
+    source = row.get("from")
+    target = row.get("to")
+    if not isinstance(source, str) or source not in states:
+        return f"{entity} transition leaves from an unknown state", None
+    if not isinstance(target, str) or target not in states:
+        return f"{entity} transition arrives at an unknown state", None
+    if source == target:
+        return f"{entity} transition {source} -> {target} does not move", None
+    test_name = row.get("test")
+    if not isinstance(test_name, str) or _TEST_NAME.fullmatch(test_name) is None:
+        return f"{entity} transition {source} -> {target} test name is invalid", None
+    edge = {"from": source, "to": target, "test": test_name}
+    edge.update({key: row[key] for key in ("event", "guard") if isinstance(row.get(key), str)})
+    return "", edge
+
+
+def _parse_forbidden(
+    entity: str, states: list[str], edges: list[dict[str, str]], rows: Any
+) -> tuple[list[str], list[dict[str, str]]]:
+    """A forbidden transition names a move that the machine must reject."""
+    if not isinstance(rows, list):
+        return [f"{entity} forbidden_transitions must be a list"], []
+    declared = {(edge["from"], edge["to"]) for edge in edges}
+    errors: list[str] = []
+    forbidden: list[dict[str, str]] = []
+    for row in rows:
+        problem, edge = _parse_edge(entity, states, row)
+        if edge is None:
+            errors.append(problem.replace(" transition ", " forbidden transition ", 1))
+            continue
+        pair = (edge["from"], edge["to"])
+        if pair in declared:
+            errors.append(f"{entity} forbidden transition {pair[0]} -> {pair[1]} is also a transition")
+            continue
+        if pair in {(item["from"], item["to"]) for item in forbidden}:
+            errors.append(f"{entity} forbidden transition {pair[0]} -> {pair[1]} is in the list twice")
+            continue
+        forbidden.append({"from": edge["from"], "to": edge["to"], "test": edge["test"]})
+    return errors, forbidden
+
+
+def _reach_errors(machine: dict) -> list[str]:
+    """Each state must be on a path from the initial state."""
+    reached = {machine["initial"]}
+    frontier = [machine["initial"]]
+    while frontier:
+        state = frontier.pop()
+        for edge in machine["transitions"]:
+            if edge["from"] == state and edge["to"] not in reached:
+                reached.add(edge["to"])
+                frontier.append(edge["to"])
+    return [
+        f"{machine['entity']} state {state} cannot be reached from the initial state"
+        for state in machine["states"]
+        if state not in reached
+    ]
+
+
+def _test_name_errors(machine: dict) -> list[str]:
+    """One test proves one transition. A test name must not repeat."""
+    tests = machine_tests(machine)
+    repeated = sorted({name for name in tests if tests.count(name) > 1})
+    return [f"{machine['entity']} test name {name} is on two transitions" for name in repeated]
 
 
 def _read_json(root: Path, relative: Any, errors: list[str]) -> Any:
@@ -422,3 +595,15 @@ def _under(path: str, prefix: str) -> bool:
 
 def _matches_any(path: str, patterns: list[Any]) -> bool:
     return any(isinstance(pattern, str) and _under(path, pattern) for pattern in patterns)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the architecture checks of the gate checker."""
+    import gatecheck
+
+    args = list(sys.argv[1:] if argv is None else argv)
+    return gatecheck.main(["--architecture", *args])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,416 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/governance/schemas/project.schema.json",
+  "title": "ProjectFile",
+  "description": "The project file .governance/project.json. It holds the values that change from one repository to the next. The gate checker validates this file before it runs a check. An unknown key is an error.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project",
+    "packet",
+    "spdx",
+    "scope",
+    "verification",
+    "lane",
+    "hosts",
+    "ci",
+    "toolchain",
+    "policy",
+    "gatekeeper",
+    "owner",
+    "architecture"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Schema set version. It must equal the provenance.schema_version constant in common.schema.json."
+    },
+    "project": {
+      "type": "object",
+      "required": ["name", "full_name", "version", "repository", "owner_login"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "full_name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "repository": { "$ref": "common.schema.json#/$defs/repository" },
+        "owner_login": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$",
+          "description": "The host login of the owner. CODEOWNERS names this login on each rule."
+        }
+      }
+    },
+    "packet": {
+      "type": "object",
+      "required": ["id_prefix"],
+      "additionalProperties": false,
+      "properties": {
+        "id_prefix": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*$" }
+      }
+    },
+    "spdx": {
+      "type": "object",
+      "required": ["license_id", "copyright_line", "extensions", "basenames", "exempt_basenames"],
+      "additionalProperties": false,
+      "properties": {
+        "license_id": { "type": "string", "minLength": 1 },
+        "copyright_line": { "type": "string", "minLength": 1 },
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/extension" }
+        },
+        "basenames": { "$ref": "#/$defs/name_list" },
+        "exempt_basenames": { "$ref": "#/$defs/name_list" }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "required": ["allowed_top_level", "protected_path_patterns", "amendment_path_patterns"],
+      "additionalProperties": false,
+      "properties": {
+        "allowed_top_level": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" }
+        },
+        "protected_path_patterns": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/regex" }
+        },
+        "amendment_path_patterns": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/regex" }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": ["command_prefixes"],
+      "additionalProperties": false,
+      "properties": {
+        "command_prefixes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "lane": {
+      "type": "object",
+      "required": ["local_only_requires"],
+      "additionalProperties": false,
+      "properties": {
+        "local_only_requires": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+        }
+      }
+    },
+    "hosts": {
+      "type": "object",
+      "required": ["local_kinds", "cloud_kinds", "ci_kinds"],
+      "additionalProperties": false,
+      "properties": {
+        "local_kinds": { "$ref": "#/$defs/host_kinds" },
+        "cloud_kinds": { "$ref": "#/$defs/host_kinds" },
+        "ci_kinds": { "$ref": "#/$defs/host_kinds" }
+      }
+    },
+    "ci": {
+      "type": "object",
+      "required": [
+        "workflow_file",
+        "job_name",
+        "required_checks",
+        "test_check",
+        "check_commands",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workflow_file": { "type": "string", "pattern": "^[A-Za-z0-9._-]+\\.ya?ml$" },
+        "job_name": { "$ref": "#/$defs/check_name" },
+        "required_checks": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/check_name" }
+        },
+        "test_check": { "$ref": "#/$defs/check_name" },
+        "check_commands": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "common.schema.json#/$defs/command" }
+        },
+        "evidence": {
+          "type": "object",
+          "required": ["test_report", "coverage_report"],
+          "additionalProperties": false,
+          "description": "Reports that the product test command writes in CI. The --evidence option reads them. null means that the project has no report yet.",
+          "properties": {
+            "test_report": {
+              "anyOf": [{ "$ref": "common.schema.json#/$defs/scope_path" }, { "type": "null" }],
+              "description": "A JUnit XML file. A failed test or an ignored test fails the check."
+            },
+            "coverage_report": {
+              "anyOf": [{ "$ref": "common.schema.json#/$defs/scope_path" }, { "type": "null" }],
+              "description": "A Cobertura XML file, a JaCoCo XML file, or an LCOV file. A result below policy.coverage_floor_percent fails the check."
+            }
+          }
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "required": ["language", "pin_file"],
+      "additionalProperties": false,
+      "properties": {
+        "language": { "type": "string", "minLength": 1 },
+        "pin_file": {
+          "anyOf": [
+            { "$ref": "common.schema.json#/$defs/scope_path" },
+            { "type": "null" }
+          ],
+          "description": "The pin file is a protected path when it is not null."
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": ["max_cyclomatic_complexity", "coverage_floor_percent", "forbidden_constructs"],
+      "additionalProperties": false,
+      "properties": {
+        "max_cyclomatic_complexity": { "type": "integer", "minimum": 1 },
+        "coverage_floor_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "forbidden_constructs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/forbidden_construct" },
+          "description": "Text that the project forbids. The gate checker reads each file under the paths and fails on a match."
+        }
+      }
+    },
+    "gatekeeper": {
+      "type": "object",
+      "required": ["persona_id", "agent_id_pattern"],
+      "additionalProperties": false,
+      "properties": {
+        "persona_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$" },
+        "agent_id_pattern": { "$ref": "#/$defs/regex" }
+      }
+    },
+    "owner": {
+      "type": "object",
+      "required": ["agent_id_pattern"],
+      "additionalProperties": false,
+      "properties": {
+        "agent_id_pattern": {
+          "$ref": "#/$defs/regex",
+          "description": "An agent with role OWNER must have an agent_id that matches this pattern."
+        }
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "required": [
+        "document",
+        "use_case_catalog",
+        "state_machines",
+        "change_paths",
+        "layers",
+        "layer_exempt_prefixes",
+        "import_rules"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "document": { "$ref": "common.schema.json#/$defs/scope_path" },
+        "use_case_catalog": { "$ref": "common.schema.json#/$defs/scope_path" },
+        "state_machines": { "$ref": "common.schema.json#/$defs/scope_path" },
+        "change_paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/scope_path" }
+        },
+        "layers": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/directory" }
+          },
+          "description": "Map from layer name to directory paths. A layer name has lower-case letters, digits, and hyphens."
+        },
+        "layer_exempt_prefixes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/scope_path" },
+          "description": "Paths that are not in a layer. An entry that ends with / is a directory. Any other entry is one file. The import rules do not apply to these paths."
+        },
+        "import_rules": {
+          "type": "object",
+          "required": ["allowed", "forbidden", "non_source_extensions", "scanners"],
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/layer_name" }
+              },
+              "description": "Map from each layer to the other layers that it can import. A layer can always import itself. The map must not contain a cycle."
+            },
+            "forbidden": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/regex" }
+              },
+              "description": "Map from a layer to patterns. A file in that layer must not import a name that matches a pattern."
+            },
+            "non_source_extensions": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^(\\.[A-Za-z0-9_+-]+)?$" },
+              "description": "File suffixes in a layer that hold no import. The empty string is a file with no suffix."
+            },
+            "scanners": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/scanner" },
+              "description": "One scanner for each source language. A file in a layer must have a scanner, or its suffix must be in non_source_extensions."
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "regex": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A regular expression. The gate checker fails when the text does not compile."
+    },
+    "extension": { "type": "string", "pattern": "^\\.[A-Za-z0-9_+-]+$" },
+    "name_list": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "host_kinds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/host_kind" }
+    },
+    "check_name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$" },
+    "layer_name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "forbidden_construct": {
+      "type": "object",
+      "required": ["id", "pattern", "paths", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+        "pattern": {
+          "$ref": "#/$defs/regex",
+          "description": "The checker applies the pattern to one line at a time."
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/scope_path" },
+          "description": "Where the construct is forbidden. An entry that ends with / is a directory."
+        },
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/extension" },
+          "description": "Optional. Limit the check to these file suffixes."
+        },
+        "reason": { "type": "string", "minLength": 10 }
+      }
+    },
+    "scanner": {
+      "type": "object",
+      "required": ["parser", "extensions"],
+      "additionalProperties": false,
+      "properties": {
+        "parser": {
+          "type": "string",
+          "enum": ["python", "regex"],
+          "description": "python reads the syntax tree of a Python file. regex reads any language with the patterns in this scanner."
+        },
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/extension" }
+        },
+        "roots": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^([A-Za-z0-9._][A-Za-z0-9._/-]*/)?$" },
+          "description": "For the python parser. Directories that an absolute import starts from. The empty string is the repository root."
+        },
+        "import_patterns": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/regex" },
+          "description": "For the regex parser. Each pattern has one group. The group is the imported name."
+        },
+        "layer_patterns": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/regex" }
+          },
+          "description": "For the regex parser. Map from a layer to patterns. An imported name that matches a pattern is an import of that layer."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["parser"], "properties": { "parser": { "const": "python" } } },
+          "then": {
+            "required": ["roots"],
+            "not": {
+              "anyOf": [{ "required": ["import_patterns"] }, { "required": ["layer_patterns"] }]
+            }
+          }
+        },
+        {
+          "if": { "required": ["parser"], "properties": { "parser": { "const": "regex" } } },
+          "then": {
+            "required": ["import_patterns", "layer_patterns"],
+            "not": { "required": ["roots"] }
+          }
+        }
+      ]
+    },
+    "directory": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._][A-Za-z0-9._/-]*/$",
+      "description": "A repository-relative directory. It ends with /."
+    }
+  }
+}

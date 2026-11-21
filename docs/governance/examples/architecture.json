@@ -1,0 +1,34 @@
+{
+  "document": "docs/governance/examples/README.md",
+  "use_case_catalog": "docs/governance/examples/fixtures/use-cases.json",
+  "state_machines": "docs/governance/examples/fixtures/state-machines.json",
+  "change_paths": [
+    "docs/design/ARCHITECTURE.md",
+    "docs/design/fixtures/"
+  ],
+  "layers": {
+    "presentation": ["src/presentation/"],
+    "application": ["src/application/"],
+    "domain": ["src/domain/"],
+    "infrastructure": ["src/infrastructure/"]
+  },
+  "layer_exempt_prefixes": [
+    "docs/design/",
+    "docs/governance/",
+    ".github/",
+    ".governance/",
+    "tools/gatecheck/",
+    "LICENSES/"
+  ],
+  "import_rules": {
+    "allowed": {
+      "presentation": ["application", "domain"],
+      "application": ["domain"],
+      "domain": [],
+      "infrastructure": ["application", "domain"]
+    },
+    "forbidden": {},
+    "non_source_extensions": [".md"],
+    "scanners": []
+  }
+}

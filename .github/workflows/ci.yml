@@ -5,6 +5,9 @@
 # The first run can be the red run. A later push on the same pull request
 # can be the green run. See docs/governance/GOVERNANCE_LINUS.md section 10.
 # The required check name is ci.job_name in .governance/project.json.
+#
+# Each run is evidence for one commit. This workflow does not cancel a run.
+# A cancelled run cannot be the red run of a regression test.
 name: ci
 
 on:
@@ -15,18 +18,20 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   gate:
     name: gate
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
+      # Check out the head commit of the pull request, not the merge commit.
+      # The run is then evidence for the exact head SHA.
+      # The scope step needs the full history to find the base commit.
       - name: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: gatecheck
@@ -37,3 +42,8 @@ jobs:
 
       - name: spdx
         run: python3 tools/gatecheck/gatecheck.py --spdx-only
+
+      # Head SHA, fresh base, packet scope, protected paths, and planned tests.
+      - name: scope
+        if: github.event_name == 'pull_request'
+        run: python3 tools/gatecheck/gatecheck.py --pr

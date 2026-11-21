@@ -1,0 +1,22 @@
+{
+  "machines": [
+    {
+      "entity": "Item",
+      "linear": true,
+      "initial": "draft",
+      "states": ["draft", "active", "archived"],
+      "transitions": [
+        {
+          "from": "draft",
+          "to": "active",
+          "test": "item_draft_to_active"
+        },
+        {
+          "from": "active",
+          "to": "archived",
+          "test": "item_active_to_archived"
+        }
+      ]
+    }
+  ]
+}

@@ -27,6 +27,9 @@ Read `docs/governance/GOVERNANCE_LINUS.md` section 16.
 
 Agents must not move logic across layers.
 Set the directory for each layer in `.governance/project.json`.
+Set which layers each layer can import in `architecture.import_rules`.
+The gate checker reads the imports of each source file.
+A packet has one layer.
 
 ### Presentation
 
@@ -34,11 +37,15 @@ Rule: [Presentation shows data and sends intent. It does not decide domain rules
 
 Paths: `src/presentation/`
 
+Imports: application and domain.
+
 ### Application
 
 Rule: [Application orders the use case. It does not store data and it does not render a view.]
 
 Paths: `src/application/`
+
+Imports: domain.
 
 ### Domain
 
@@ -46,11 +53,22 @@ Rule: [Domain holds entities, transitions, and use-case rules. It does not call 
 
 Paths: `src/domain/`
 
+Imports: no other layer.
+
 ### Infrastructure
 
 Rule: [Infrastructure talks to the network, the database, and the clock. It does not own a use-case rule.]
 
 Paths: `src/infrastructure/`
+
+Imports: application and domain.
+
+### The file that connects the layers
+
+One file makes the infrastructure objects and gives them to the application.
+That file is in no layer. List it in `architecture.layer_exempt_prefixes`.
+
+Path: `[path of that file]`
 
 ## 3. Core use cases
 
@@ -81,6 +99,11 @@ States, in order: `[state]`, `[state]`, `[state]`.
 A transition moves to the next state only.
 Do not skip a state.
 A packet that names this machine lists one regression test for each transition.
+
+A machine with a branch or a loop is not linear. Set `linear` to false in the fixture.
+List each transition with its states. An event and a guard are optional.
+List each move that the machine must reject as a forbidden transition.
+Each transition and each forbidden transition names one regression test.
 
 The filled example is `docs/design/fixtures/state-machines.json`.
 That example is the `Item` machine.

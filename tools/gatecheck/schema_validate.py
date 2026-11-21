@@ -140,6 +140,11 @@ class SchemaSet:
         errors = self._validate(instance, self.documents[schema_file], schema_file, "$")
         return (not errors, errors)
 
+    def validate_ref(self, ref: str, instance: Any) -> list[str]:
+        """Validate one instance against the schema that a file reference names."""
+        file_part = ref.partition("#")[0]
+        return self._validate(instance, {"$ref": ref}, file_part, "$")
+
     def _validate(self, instance: Any, schema: Any, schema_file: str, path: str) -> list[str]:
         if not isinstance(schema, dict):
             return [f"{path}: schema is not an object"]

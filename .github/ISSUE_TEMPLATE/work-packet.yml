@@ -12,16 +12,36 @@ body:
         One packet has its types written down. It can merge and revert alone.
         Read docs/governance/GOVERNANCE_LINUS.md section 5 and section 16.
         Cite one or more use case ids from docs/design/fixtures/use-cases.json.
-        Set the layer. Allowed files must sit under that layer.
+        Set the layer. A packet has one layer. Allowed files must sit under that layer.
         Do not put an issue number or a base SHA in the packet JSON.
         Record the issue on this form. The pull request records the base.
         Open the pull request early so CI can record the red run.
+        The planner does not write the Gate 1 verdict. The gatekeeper writes it.
   - type: input
     id: packet_id
     attributes:
       label: Packet id
       description: Use the prefix from .governance/project.json.
       placeholder: PKT-0014
+    validations:
+      required: true
+  - type: input
+    id: packet_file
+    attributes:
+      label: Packet file
+      description: The JSON file of this packet. The gate checker must accept it.
+      placeholder: docs/design/packets/PKT-0014.json
+    validations:
+      required: true
+  - type: dropdown
+    id: packet_kind
+    attributes:
+      label: Packet kind
+      description: A protected path needs a gatekeeper packet. An architecture path needs an architecture packet with worker role OWNER.
+      options:
+        - Worker packet
+        - Gatekeeper packet (gatekeeper_packet true)
+        - Architecture change (architecture_change true, worker role OWNER)
     validations:
       required: true
   - type: input
@@ -68,21 +88,30 @@ body:
     id: scope
     attributes:
       label: Allowed files
-      description: Files, or directories that end with a slash. No globs. Stay inside the layer.
+      description: Files, or directories that end with a slash. No globs. No .. segment. Stay inside the layer.
       placeholder: |
         src/domain/item.md
     validations:
       required: true
+  - type: textarea
+    id: forbidden_paths
+    attributes:
+      label: Forbidden paths
+      description: Paths near the scope that the coder must not touch.
+      placeholder: |
+        src/presentation/
+        docs/governance/
   - type: input
     id: depends
     attributes:
       label: Depends on packets
+      description: Name each packet that edits one of the same files.
       placeholder: PKT-0001
   - type: textarea
     id: verification
     attributes:
       label: Verification plan
-      description: Commands and each regression test with its assertion. Include each constraint test and each transition test.
+      description: Commands and each regression test with its assertion. Include each constraint test, each transition test, and each forbidden-transition test. A test name must be in the tree as it is written here.
     validations:
       required: true
   - type: dropdown
@@ -93,6 +122,13 @@ body:
         - CLOUD (no local-only capability)
         - LOCAL (needs a capability from lane.local_only_requires)
         - EITHER (small and fully specified)
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: New dependencies
+      description: Name and version of each new dependency, and why the current tree is not enough. Write none when the packet adds no dependency.
     validations:
       required: true
   - type: textarea

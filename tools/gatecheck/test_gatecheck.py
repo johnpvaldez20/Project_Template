@@ -7,13 +7,42 @@ Run: python3 -m unittest discover -s tools/gatecheck -v
 """
 
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 import architecture
 import gatecheck
+import projectfile
+import repo_fixture
+import repofiles
 import schema_validate
+
+
+class ReportTest(unittest.TestCase):
+    def test_report_lists_passes_and_facts_before_failures(self):
+        report = gatecheck.Report()
+        report.fail("second rule is broken")
+        report.pass_("first rule holds")
+        report.info("head_sha " + "a" * 40)
+        self.assertEqual(
+            str(report).splitlines(),
+            [
+                "ok    first rule holds",
+                "info  head_sha " + "a" * 40,
+                "FAIL  second rule is broken",
+                "1 passed, 1 failed",
+            ],
+        )
+        self.assertFalse(report.is_clean())
+
+    def test_record_adds_the_pass_line_only_for_an_empty_list(self):
+        report = gatecheck.Report()
+        report.record([], "rule holds")
+        report.record(["broken"], "other rule holds")
+        self.assertEqual(report.passed, ["rule holds"])
+        self.assertEqual(report.failures, ["broken"])
 
 
 class PathsOverlapTest(unittest.TestCase):
@@ -210,135 +239,259 @@ class SchemaValidatorTest(unittest.TestCase):
         self.assertTrue(ok)
 
 
-class MiniRepoTest(unittest.TestCase):
-    def test_design_packet_rejects_base_sha_and_issue_number(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = self._mini_repo(Path(tmp))
-            packet = json.loads((root / "docs/design/packets/PKT-0001.json").read_text())
-            packet["base_sha"] = "a" * 40
-            (root / "docs/design/packets/PKT-0001.json").write_text(json.dumps(packet))
-            report = gatecheck.run(root)
-            self.assertFalse(report.is_clean(), report)
-            self.assertTrue(any("base_sha" in line for line in report.failures), report)
+class PacketFileTest(repo_fixture.RepoCopyCase):
+    PACKET = "docs/design/packets/PKT-0001.json"
+
+    def test_copy_of_the_repository_is_clean(self):
+        self.assert_clean()
+
+    def test_design_packet_rejects_base_sha(self):
+        repo_fixture.edit_json(
+            self.root, self.PACKET, lambda packet: packet.update(base_sha="a" * 40)
+        )
+        self.assert_fails_with("base_sha")
+
+    def test_design_packet_rejects_issue_number(self):
+        repo_fixture.edit_json(
+            self.root, self.PACKET, lambda packet: packet.update(issue_number=7)
+        )
+        self.assert_fails_with("issue_number")
 
     def test_overlap_without_dependency_fails(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = self._mini_repo(Path(tmp))
-            second = json.loads((root / "docs/design/packets/PKT-0001.json").read_text())
-            second["packet_id"] = "PKT-0002"
-            second["title"] = "Add the second contract file"
-            second["subsystem_scope"]["allowed_files"] = ["docs/design/a.md"]
-            second["subsystem_scope"]["depends_on_packets"] = []
-            (root / "docs/design/packets/PKT-0002.json").write_text(json.dumps(second))
-            report = gatecheck.run(root)
-            self.assertFalse(report.is_clean(), report)
-            self.assertTrue(any("without a declared dependency" in line for line in report.failures), report)
+        self._add_packet("PKT-0002", depends_on=[])
+        self.assert_fails_with("without a declared dependency")
 
-    def _mini_repo(self, root: Path) -> Path:
-        project = {
-            "schema_version": "1.0.0",
-            "project": {
-                "name": "Widget",
-                "repository": "example/widget",
-                "owner_login": "owner",
-            },
-            "packet": {"id_prefix": "PKT"},
-            "spdx": {
-                "license_id": "LicenseRef-UNSET",
-                "copyright_line": "SPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER",
-                "extensions": [".py", ".md", ".yml"],
-                "basenames": [],
-                "exempt_basenames": ["LICENSE"],
-            },
-            "scope": {
-                "allowed_top_level": [
-                    ".governance",
-                    "docs",
-                    "tools",
-                    "README.md",
-                ],
-                "protected_path_patterns": ["^docs/governance/"],
-                "amendment_path_patterns": ["^docs/design/packets/"],
-            },
-            "verification": {"command_prefixes": ["python3 ", "git "]},
-            "lane": {"local_only_requires": ["OWNER_EYES", "PHYSICAL_DEVICE"]},
-            "hosts": {
-                "local_kinds": ["OWNER_MACHINE"],
-                "cloud_kinds": ["CURSOR_CLOUD"],
-                "ci_kinds": ["GITHUB_ACTIONS"],
-            },
-            "ci": {
-                "workflow_file": "ci.yml",
-                "job_name": "gate",
-                "required_checks": ["gatecheck", "test", "spdx"],
-                "test_check": "test",
-                "check_commands": {
-                    "gatecheck": "python3 tools/gatecheck/gatecheck.py",
-                    "test": "python3 -m unittest discover -s tools/gatecheck -v",
-                    "spdx": "python3 tools/gatecheck/gatecheck.py --spdx-only",
-                },
-            },
-            "toolchain": {"language": "undecided", "pin_file": None},
-            "policy": {
-                "max_cyclomatic_complexity": 10,
-                "coverage_floor_percent": 85,
-                "forbidden_constructs": [],
-            },
-            "gatekeeper": {
-                "persona_id": "overseer-linus-v1",
-                "agent_id_pattern": "^(overseer-linus-v[0-9]+|owner-[a-z0-9-]+)$",
-            },
-        }
-        schema = {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "$id": "https://example.invalid/governance/schemas/packet.schema.json",
-            "type": "object",
-            "required": ["gate", "packet_id", "title", "subsystem_scope"],
-            "additionalProperties": False,
-            "properties": {
-                "gate": {"const": "PACKET"},
-                "packet_id": {"type": "string", "pattern": "^PKT-[0-9]{4}$"},
-                "title": {"type": "string", "minLength": 8},
-                "subsystem_scope": {
-                    "type": "object",
-                    "required": ["allowed_files", "depends_on_packets"],
-                    "additionalProperties": False,
-                    "properties": {
-                        "allowed_files": {
-                            "type": "array",
-                            "minItems": 1,
-                            "items": {"type": "string"},
-                        },
-                        "depends_on_packets": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                    },
-                },
-            },
-        }
-        packet = {
-            "gate": "PACKET",
-            "packet_id": "PKT-0001",
-            "title": "Add the first contract file",
-            "subsystem_scope": {
-                "allowed_files": ["docs/design/a.md"],
-                "depends_on_packets": [],
-            },
-        }
-        (root / ".governance").mkdir(parents=True)
-        (root / "docs/governance/schemas").mkdir(parents=True)
-        (root / "docs/governance/examples/valid").mkdir(parents=True)
-        (root / "docs/governance/examples/invalid").mkdir(parents=True)
-        (root / "docs/design/packets").mkdir(parents=True)
-        (root / "tools/gatecheck").mkdir(parents=True)
-        (root / ".governance/project.json").write_text(json.dumps(project))
-        (root / "docs/governance/schemas/packet.schema.json").write_text(json.dumps(schema))
-        (root / "docs/design/packets/PKT-0001.json").write_text(json.dumps(packet))
-        (root / "README.md").write_text(
-            "<!--\nSPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER\nSPDX-License-Identifier: LicenseRef-UNSET\n-->\n\n# Widget\n"
+    def test_overlap_with_dependency_passes(self):
+        self._add_packet("PKT-0002", depends_on=["PKT-0001"])
+        self.assert_clean()
+
+    def test_indirect_dependency_orders_an_overlap(self):
+        self._add_packet("PKT-0002", depends_on=["PKT-0001"])
+        self._add_packet("PKT-0003", depends_on=["PKT-0002"])
+        self.assert_clean()
+
+    def test_dependency_cycle_fails(self):
+        self._add_packet("PKT-0002", depends_on=["PKT-0003"])
+        self._add_packet("PKT-0003", depends_on=["PKT-0002"])
+        self.assert_fails_with("dependency cycle")
+
+    def test_packet_file_that_is_not_json_fails(self):
+        repo_fixture.write_text(self.root, "docs/design/packets/PKT-0002.json", "{ not json")
+        self.assert_fails_with("PKT-0002.json: invalid JSON")
+
+    def _add_packet(self, packet_id: str, depends_on: list) -> None:
+        packet = repo_fixture.read_json(self.root, self.PACKET)
+        packet["packet_id"] = packet_id
+        packet["subsystem_scope"]["depends_on_packets"] = depends_on
+        repo_fixture.write_json(self.root, f"docs/design/packets/{packet_id}.json", packet)
+
+
+class AdoptionTest(repo_fixture.RepoCopyCase):
+    """Edits that the adoption page tells a new project to make."""
+
+    def test_project_can_set_its_identity(self):
+        self._set_identity()
+        self.assert_clean()
+        self.assertIn("project identity is set", gatecheck.run(self.root).passed)
+
+    def test_project_can_set_its_language(self):
+        self._set_identity()
+        repo_fixture.edit_json(
+            self.root,
+            ".governance/project.json",
+            lambda project: project["toolchain"].update(language="other-language"),
         )
-        return root
+        self.assert_clean()
+
+    def _set_identity(self) -> None:
+        def identity(project):
+            project["project"].update(
+                name="Widget",
+                full_name="Widget service",
+                repository="example/widget",
+                owner_login="example-owner",
+            )
+
+        repo_fixture.edit_json(self.root, ".governance/project.json", identity)
+        text = (self.root / "CODEOWNERS").read_text(encoding="utf-8")
+        repo_fixture.write_text(
+            self.root, "CODEOWNERS", text.replace("@replace-me", "@example-owner")
+        )
+
+    def test_project_can_raise_the_coverage_floor(self):
+        repo_fixture.edit_json(
+            self.root,
+            ".governance/project.json",
+            lambda project: project["policy"].update(coverage_floor_percent=100),
+        )
+        self.assert_clean()
+
+    def test_project_can_replace_the_architecture_catalog(self):
+        def use_cases(catalog):
+            catalog["use_cases"][0]["title"] = "Keep one setting"
+            catalog["use_cases"][0]["constraint_test"] = "setting_survives_restart"
+
+        def machines(catalog):
+            catalog["machines"] = [
+                {
+                    "entity": "Switch",
+                    "linear": False,
+                    "initial": "off",
+                    "states": ["off", "on"],
+                    "transitions": [
+                        {"from": "off", "to": "on", "test": "switch_off_to_on"},
+                        {"from": "on", "to": "off", "test": "switch_on_to_off"},
+                    ],
+                }
+            ]
+
+        def packet(value):
+            value["state_machines"] = ["Switch"]
+            value["verification_plan"]["regression_tests"] = [
+                {"name": name, "kind": "UNIT", "asserts": "The named rule holds in this test."}
+                for name in ("setting_survives_restart", "switch_off_to_on", "switch_on_to_off")
+            ]
+
+        repo_fixture.edit_json(self.root, "docs/design/fixtures/use-cases.json", use_cases)
+        repo_fixture.edit_json(self.root, "docs/design/fixtures/state-machines.json", machines)
+        repo_fixture.edit_json(self.root, "docs/design/packets/PKT-0001.json", packet)
+        self.assert_clean()
+
+    def test_examples_need_their_architecture_file(self):
+        (self.root / "docs/governance/examples/architecture.json").unlink()
+        self.assert_fails_with("missing docs/governance/examples/architecture.json")
+
+
+class ProjectFileTest(repo_fixture.RepoCopyCase):
+    CONFIG = ".governance/project.json"
+
+    def test_unknown_key_fails(self):
+        self._edit(lambda project: project.update(extra=True))
+        self.assert_fails_with("additional property extra")
+
+    def test_missing_architecture_block_fails(self):
+        self._edit(lambda project: project.pop("architecture"))
+        self.assert_fails_with("missing required property architecture")
+
+    def test_coverage_floor_must_be_a_number(self):
+        self._edit(lambda project: project["policy"].update(coverage_floor_percent="85"))
+        self.assert_fails_with("policy/coverage_floor_percent: expected type number")
+
+    def test_pattern_that_does_not_compile_fails(self):
+        self._edit(lambda project: project["scope"]["protected_path_patterns"].append("("))
+        self.assert_fails_with("is not a regular expression")
+
+    def test_required_check_needs_a_command(self):
+        self._edit(lambda project: project["ci"]["required_checks"].append("lint"))
+        self.assert_fails_with("no command for the required check lint")
+
+    def test_test_check_must_be_a_required_check(self):
+        self._edit(lambda project: project["ci"].update(test_check="other"))
+        self.assert_fails_with("ci.test_check must be one of ci.required_checks")
+
+    def test_check_command_needs_an_allowed_prefix(self):
+        self._edit(lambda project: project["ci"]["check_commands"].update(test="make test"))
+        self.assert_fails_with("ci.check_commands.test does not start with a prefix")
+
+    def test_checker_directory_must_be_protected(self):
+        self._edit(
+            lambda project: project["scope"]["protected_path_patterns"].remove("^tools/gatecheck/")
+        )
+        self.assert_fails_with("tools/gatecheck/gatecheck.py must match scope.protected_path_patterns")
+
+    def test_layer_paths_must_not_overlap(self):
+        self._edit(
+            lambda project: project["architecture"]["layers"]["application"].append("src/domain/rules/")
+        )
+        self.assert_fails_with("layer paths src/domain/rules/ and src/domain/ overlap")
+
+    def test_layer_name_must_be_lower_case(self):
+        self._edit(lambda project: project["architecture"]["layers"].update(Core=["src/core/"]))
+        self.assert_fails_with("invalid layer name 'Core'")
+
+    def test_identity_that_is_partly_set_fails(self):
+        self._edit(lambda project: project["project"].update(name="Widget"))
+        self.assert_fails_with("project.repository still holds the template placeholder")
+
+    def test_template_must_not_choose_a_language(self):
+        self._edit(lambda project: project["toolchain"].update(language="other-language"))
+        self.assert_fails_with("toolchain.language is set but the project identity is a placeholder")
+
+    def test_schema_version_must_match_the_schema(self):
+        self._edit(lambda project: project.update(schema_version="9.9.9"))
+        self.assert_fails_with("schema_version 9.9.9 is not the schema constant")
+
+    def test_pin_file_is_a_protected_path(self):
+        project = repo_fixture.read_json(self.root, self.CONFIG)
+        self.assertFalse(gatecheck.path_is_protected("toolchain.lock", project))
+        project["toolchain"]["pin_file"] = "toolchain.lock"
+        self.assertTrue(gatecheck.path_is_protected("toolchain.lock", project))
+
+    def _edit(self, change) -> None:
+        repo_fixture.edit_json(self.root, self.CONFIG, change)
+
+
+class CodeownersTest(repo_fixture.RepoCopyCase):
+    HEADER = repo_fixture.hash_header()
+
+    def test_missing_file_fails(self):
+        (self.root / "CODEOWNERS").unlink()
+        self.assert_fails_with("missing CODEOWNERS at the repository root")
+
+    def test_second_file_fails(self):
+        repo_fixture.write_text(self.root, ".github/CODEOWNERS", self.HEADER + "* @replace-me\n")
+        self.assert_fails_with(".github/CODEOWNERS must not exist")
+
+    def test_rule_without_the_owner_fails(self):
+        self._write("* @replace-me\n/src/ @someone-else\n")
+        self.assert_fails_with("CODEOWNERS rule /src/ does not name @replace-me")
+
+    def test_owner_in_a_comment_does_not_count(self):
+        self._write("# @replace-me\n* @someone-else\n")
+        self.assert_fails_with("CODEOWNERS rule * does not name @replace-me")
+
+    def test_file_needs_a_rule_for_every_path(self):
+        self._write("/docs/ @replace-me\n")
+        self.assert_fails_with("CODEOWNERS needs a rule for *")
+
+    def test_login_case_does_not_matter(self):
+        self._write("* @Replace-Me\n")
+        self.assert_clean()
+
+    def _write(self, rules: str) -> None:
+        repo_fixture.write_text(self.root, "CODEOWNERS", self.HEADER + rules)
+
+
+class RepositoryFilesTest(repo_fixture.RepoCopyCase):
+    def test_walk_lists_each_file_once(self):
+        files = repofiles.list_files(self.root)
+        self.assertIn(".governance/project.json", files)
+        self.assertEqual(len(files), len(set(files)))
+
+    def test_file_that_git_ignores_is_not_repository_content(self):
+        self._git("init", "-q")
+        (self.root / ".pytest_cache").mkdir()
+        repo_fixture.write_text(self.root, ".pytest_cache/README.md", "cache\n")
+        repo_fixture.write_text(self.root, ".env", "TOKEN=value\n")
+        repo_fixture.write_text(self.root, "tools/gatecheck/__pycache__/x.pyc", "x")
+        files = repofiles.list_files(self.root)
+        self.assertNotIn(".env", files)
+        self.assertNotIn(".pytest_cache/README.md", files)
+        self.assert_clean()
+
+    def test_file_that_git_does_not_ignore_is_repository_content(self):
+        self._git("init", "-q")
+        repo_fixture.write_text(self.root, "stray.txt", "stray\n")
+        self.assertIn("stray.txt", repofiles.list_files(self.root))
+        self.assert_fails_with("top-level path stray.txt is not in the project config")
+
+    def _git(self, *args: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.root), *args],
+            check=True,
+            capture_output=True,
+            env=repofiles.git_env(),
+        )
 
 
 class ArchitectureRuleTest(unittest.TestCase):
@@ -435,6 +588,24 @@ class RepositoryTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         report = gatecheck.run(root)
         self.assertTrue(report.is_clean(), str(report))
+
+    def test_snapshot_equals_the_template_files(self):
+        """A project that adopted the template keeps the snapshot as it is."""
+        project = repo_fixture.read_json(repo_fixture.SOURCE_ROOT, repo_fixture.CONFIG)
+        if projectfile.is_template(project):
+            self.assertEqual(
+                repo_fixture.snapshot_differences(),
+                [],
+                "run python3 tools/gatecheck/repo_fixture.py",
+            )
+
+    def test_tests_do_not_read_the_project_of_this_repository(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = repo_fixture.copy_repo(Path(tmp))
+            self.assertTrue(projectfile.is_template(repo_fixture.read_json(root, repo_fixture.CONFIG)))
+            self.assertFalse((root / "tools").exists())
+            report = gatecheck.run(root)
+            self.assertTrue(report.is_clean(), str(report))
 
 
 if __name__ == "__main__":

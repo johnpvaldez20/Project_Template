@@ -1,0 +1,136 @@
+{
+  "gate": "G3_QA_MERGE",
+  "packet_id": "{{packet:0003}}",
+  "provenance": {
+    "schema_version": "2.0.0",
+    "produced_at": "2026-10-31T18:00:00Z",
+    "author": {
+      "agent_id": "overseer-linus-v1",
+      "role": "GATEKEEPER",
+      "runtime": "LOCAL",
+      "host": {
+        "kind": "OWNER_MACHINE",
+        "name": "worker-host",
+        "arch": "x86_64"
+      },
+      "model": {
+        "provider": "HUMAN",
+        "name": "gatekeeper",
+        "settings": {
+          "reasoning_effort": "high"
+        }
+      },
+      "tool": {
+        "name": "GH_CLI"
+      }
+    },
+    "worker": {
+      "agent_id": "cursor-cloud-qa-01",
+      "role": "QA",
+      "runtime": "CLOUD",
+      "host": {
+        "kind": "CURSOR_CLOUD",
+        "name": "worker-host",
+        "arch": "x86_64"
+      },
+      "model": {
+        "provider": "XAI",
+        "name": "grok-4.7",
+        "settings": {
+          "reasoning_effort": "high"
+        }
+      },
+      "tool": {
+        "name": "CURSOR_CLOUD_AGENT"
+      }
+    }
+  },
+  "github": {
+    "repository": "{{repository}}",
+    "branch": "pkt/{{packet:0003}}-scope-review",
+    "pr_number": 21,
+    "head_sha": "5e6d7c8b9a0f1e2d3c4b5a697887766554433221",
+    "merge_base_is_main_head": true
+  },
+  "handoff_artifact": {
+    "kind": "PR_REVIEW",
+    "url": "{{github_base}}/pull/21#pullrequestreview-3300000022"
+  },
+  "gate2_verdict_url": "{{github_base}}/pull/21#pullrequestreview-3300000020",
+  "verdict": "MERGE_APPROVED",
+  "ci_evidence": {
+    "provider": "GITHUB_ACTIONS",
+    "workflow": "ci.yml",
+    "head_sha": "5e6d7c8b9a0f1e2d3c4b5a697887766554433221",
+    "conclusion": "SUCCESS",
+    "run_id": 19870000021,
+    "run_url": "{{github_base}}/actions/runs/19870000021",
+    "checks": "{{required_checks}}"
+  },
+  "local_runs": [],
+  "isolation_telemetry": {
+    "worker_lane_id": "cloud-lane-01",
+    "runtime": "CLOUD",
+    "temp_dir_strategy": "TEMPDIR_PER_TEST",
+    "env_isolation": {
+      "home_overridden": true,
+      "target_dir_isolated": true,
+      "network_disabled": true
+    },
+    "shared_state_pollution_detected": false
+  },
+  "test_integrity_audit": {
+    "existing_assertions_weakened": false,
+    "skips_or_ignores_added": false,
+    "core_state_mocked_out": false,
+    "deterministic_fixtures_used": true,
+    "regression_test": {
+      "required": true,
+      "name": "item_round_trip",
+      "red_run": {
+        "head_sha": "5e6d7c8b9a0f1e2d3c4b5a697887766554433221",
+        "command": "python3 -m unittest discover -s tools/gatecheck -v",
+        "exit_code": 1,
+        "run_url": "{{github_base}}/actions/runs/1002"
+      },
+      "green_run": {
+        "head_sha": "5e6d7c8b9a0f1e2d3c4b5a697887766554433221",
+        "command": "python3 -m unittest discover -s tools/gatecheck -v",
+        "exit_code": 0,
+        "run_url": "{{github_base}}/actions/runs/1002"
+      },
+      "reproduces_failure_without_patch": true
+    }
+  },
+  "coverage": {
+    "tool": "configured",
+    "line_percentage": 100,
+    "scope": [
+      "core"
+    ]
+  },
+  "blocking_defects": [],
+  "merge": {
+    "method": "SQUASH",
+    "merged_by": {
+      "agent_id": "overseer-linus-v1",
+      "role": "GATEKEEPER",
+      "runtime": "LOCAL",
+      "host": {
+        "kind": "OWNER_MACHINE",
+        "name": "worker-host",
+        "arch": "x86_64"
+      },
+      "model": {
+        "provider": "HUMAN",
+        "name": "gatekeeper",
+        "settings": {
+          "reasoning_effort": "high"
+        }
+      },
+      "tool": {
+        "name": "GH_CLI"
+      }
+    }
+  }
+}

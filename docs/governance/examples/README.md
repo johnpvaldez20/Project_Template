@@ -15,9 +15,19 @@ The file name names the defect.
 A schema change that accepts an invalid file has opened a hole.
 
 Example strings may contain `{{repository}}`, `{{github_base}}`, and `{{packet:0003}}`.
+A Gate 2 example sets the language to `{{toolchain_language}}`.
 The checker expands them from the project file.
 The valid Gate 3 merge file sets `checks` to `{{required_checks}}`.
 The checker fills that value from `ci.check_commands`.
+
+The examples have their own architecture catalog.
+`architecture.json` names the example layers and the example fixtures.
+`fixtures/` holds the example use case and the example state machine.
+A project replaces the catalog in `docs/design/fixtures/`.
+That edit does not change the examples.
+
+Each invalid file must have a row in the table below.
+The checker fails when a row is missing.
 
 | Invalid file | The defect |
 |---|---|
@@ -30,17 +40,24 @@ The checker fills that value from `ci.check_commands`.
 | `gate1-pass-unknown-use-case` | PASS that cites an id missing from the catalog |
 | `gate1-pass-file-outside-layer` | PASS whose allowed file is outside the declared layer |
 | `gate1-pass-missing-constraint-test` | PASS that omits the use-case constraint test |
+| `gate1-verdict-signed-by-a-planner` | A planner signs the verdict |
 | `packet-hardcodes-issue-number` | A packet file contains `issue_number` |
 | `packet-hardcodes-base-sha` | A packet file contains `base_sha` |
 | `packet-architecture-change-by-planner` | Architecture packet whose worker is not OWNER |
 | `packet-architecture-mixed-with-feature` | Architecture packet that also lists a feature file |
 | `packet-missing-transition-test` | Packet omits a state-transition test |
+| `packet-path-leaves-the-layer` | An allowed file has a `..` segment |
+| `packet-coder-lists-the-checker` | A worker packet lists the gate checker |
+| `packet-owner-role-with-worker-id` | Role OWNER with an id that is not an owner id |
 | `gate2-pass-with-out-of-scope-files` | PASS with a file outside scope |
 | `gate2-ollama-model-claims-cloud-runtime` | OLLAMA model with runtime CLOUD |
 | `gate2-pass-on-stale-base` | PASS while the base is stale |
 | `gate2-pass-with-forbidden-construct` | PASS with a forbidden construct |
 | `gate2-dependency-without-justification` | Justification is too short |
 | `gate2-abbreviated-base-sha` | Optional base SHA is not 40 hex characters |
+| `gate2-verdict-signed-by-a-coder` | A coder signs the verdict |
+| `gate2-protected-file-not-declared` | A protected file is modified and the flag is false |
+| `gate2-pass-complexity-above-limit` | PASS with complexity above the configured limit |
 | `gate3-merge-approved-with-failed-ci` | Approval with CI failure |
 | `gate3-merge-approved-without-ci-run` | Approval with CI missing |
 | `gate3-abbreviated-sha` | Short SHA |
@@ -53,6 +70,11 @@ The checker fills that value from `ci.check_commands`.
 | `gate3-unknown-top-level-field` | Unknown field |
 | `gate3-merged-by-coder` | A coder is recorded as the merger |
 | `gate3-merge-approved-missing-required-check` | A required CI check is absent |
+| `gate3-merge-approved-without-test-counts` | Approval that omits a test counter |
+| `gate3-approval-signed-by-its-worker` | The author is the worker |
+| `gate3-merged-by-the-worker` | The merger is the worker |
+| `gate3-red-run-is-the-green-run` | One CI run is the red run and the green run |
+| `gate3-run-url-names-another-run` | The run URL does not end with the run id |
 
 Valid Gate 2 and Gate 3 files omit `issue_number` and `base_sha`.
 Those fields stay optional on a verdict.
