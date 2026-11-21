@@ -201,7 +201,8 @@
         "state_machines",
         "change_paths",
         "layers",
-        "layer_exempt_prefixes"
+        "layer_exempt_prefixes",
+        "import_rules"
       ],
       "additionalProperties": false,
       "properties": {
@@ -229,7 +230,44 @@
           "type": "array",
           "uniqueItems": true,
           "items": { "$ref": "common.schema.json#/$defs/scope_path" },
-          "description": "Paths that are not in a layer. An entry that ends with / is a directory. Any other entry is one file."
+          "description": "Paths that are not in a layer. An entry that ends with / is a directory. Any other entry is one file. The import rules do not apply to these paths."
+        },
+        "import_rules": {
+          "type": "object",
+          "required": ["allowed", "forbidden", "non_source_extensions", "scanners"],
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/layer_name" }
+              },
+              "description": "Map from each layer to the other layers that it can import. A layer can always import itself. The map must not contain a cycle."
+            },
+            "forbidden": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/regex" }
+              },
+              "description": "Map from a layer to patterns. A file in that layer must not import a name that matches a pattern."
+            },
+            "non_source_extensions": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^(\\.[A-Za-z0-9_+-]+)?$" },
+              "description": "File suffixes in a layer that hold no import. The empty string is a file with no suffix."
+            },
+            "scanners": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/scanner" },
+              "description": "One scanner for each source language. A file in a layer must have a scanner, or its suffix must be in non_source_extensions."
+            }
+          }
         }
       }
     }
@@ -253,6 +291,68 @@
       "items": { "$ref": "common.schema.json#/$defs/host_kind" }
     },
     "check_name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$" },
+    "layer_name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "scanner": {
+      "type": "object",
+      "required": ["parser", "extensions"],
+      "additionalProperties": false,
+      "properties": {
+        "parser": {
+          "type": "string",
+          "enum": ["python", "regex"],
+          "description": "python reads the syntax tree of a Python file. regex reads any language with the patterns in this scanner."
+        },
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/extension" }
+        },
+        "roots": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^([A-Za-z0-9._][A-Za-z0-9._/-]*/)?$" },
+          "description": "For the python parser. Directories that an absolute import starts from. The empty string is the repository root."
+        },
+        "import_patterns": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/regex" },
+          "description": "For the regex parser. Each pattern has one group. The group is the imported name."
+        },
+        "layer_patterns": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/regex" }
+          },
+          "description": "For the regex parser. Map from a layer to patterns. An imported name that matches a pattern is an import of that layer."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["parser"], "properties": { "parser": { "const": "python" } } },
+          "then": {
+            "required": ["roots"],
+            "not": {
+              "anyOf": [{ "required": ["import_patterns"] }, { "required": ["layer_patterns"] }]
+            }
+          }
+        },
+        {
+          "if": { "required": ["parser"], "properties": { "parser": { "const": "regex" } } },
+          "then": {
+            "required": ["import_patterns", "layer_patterns"],
+            "not": { "required": ["roots"] }
+          }
+        }
+      ]
+    },
     "directory": {
       "type": "string",
       "pattern": "^[A-Za-z0-9._][A-Za-z0-9._/-]*/$",

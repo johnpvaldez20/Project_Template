@@ -19,5 +19,16 @@
     ".governance/",
     "tools/gatecheck/",
     "LICENSES/"
-  ]
+  ],
+  "import_rules": {
+    "allowed": {
+      "presentation": ["application", "domain"],
+      "application": ["domain"],
+      "domain": [],
+      "infrastructure": ["application", "domain"]
+    },
+    "forbidden": {},
+    "non_source_extensions": [".md"],
+    "scanners": []
+  }
 }

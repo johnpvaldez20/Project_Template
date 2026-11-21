@@ -58,6 +58,7 @@ def semantic_errors(project: dict) -> list[str]:
     return (
         _ci_errors(project)
         + _layer_errors(project)
+        + _import_rule_errors(project)
         + _protection_errors(project)
         + _identity_errors(project)
     )
@@ -72,10 +73,7 @@ def _pattern_errors(project: dict) -> list[str]:
     }
     errors: list[str] = []
     for label, patterns in groups.items():
-        for pattern in patterns:
-            problem = regex_problem(pattern)
-            if problem:
-                errors.append(f"{label}: {pattern!r} is not a regular expression: {problem}")
+        errors.extend(_regex_list_errors(label, patterns))
     return errors
 
 
@@ -124,6 +122,91 @@ def _layer_errors(project: dict) -> list[str]:
     return errors
 
 
+def _import_rule_errors(project: dict) -> list[str]:
+    architecture = project["architecture"]
+    rules = architecture["import_rules"]
+    layers = set(architecture["layers"])
+    errors = _allowed_map_errors(rules["allowed"], layers)
+    for layer, patterns in rules["forbidden"].items():
+        if layer not in layers:
+            errors.append(f"import_rules.forbidden names the unknown layer {layer}")
+        errors.extend(_regex_list_errors(f"import_rules.forbidden.{layer}", patterns))
+    errors.extend(_scanner_errors(rules, layers))
+    return errors
+
+
+def _allowed_map_errors(allowed: dict, layers: set[str]) -> list[str]:
+    errors: list[str] = []
+    if set(allowed) != layers:
+        errors.append("import_rules.allowed needs one key for each layer in architecture.layers")
+    for layer, targets in allowed.items():
+        for target in targets:
+            if target == layer:
+                errors.append(f"import_rules.allowed.{layer} names itself")
+            elif target not in layers:
+                errors.append(f"import_rules.allowed.{layer} names the unknown layer {target}")
+    if not errors and _has_cycle(allowed):
+        errors.append("import_rules.allowed contains a cycle. Imports must have one direction.")
+    return errors
+
+
+def _has_cycle(graph: dict) -> bool:
+    done: set[str] = set()
+    active: set[str] = set()
+
+    def visit(node: str) -> bool:
+        if node in active:
+            return True
+        if node in done:
+            return False
+        active.add(node)
+        found = any(visit(target) for target in graph.get(node, []))
+        active.remove(node)
+        done.add(node)
+        return found
+
+    return any(visit(node) for node in graph)
+
+
+def _scanner_errors(rules: dict, layers: set[str]) -> list[str]:
+    errors: list[str] = []
+    owner: dict[str, int] = {}
+    non_source = {item.lower() for item in rules["non_source_extensions"]}
+    for index, scanner in enumerate(rules["scanners"]):
+        label = f"import_rules.scanners[{index}]"
+        for extension in scanner["extensions"]:
+            key = extension.lower()
+            if key in owner:
+                errors.append(f"{label} reads {extension}, which scanner {owner[key]} also reads")
+            owner.setdefault(key, index)
+            if key in non_source:
+                errors.append(f"{label} reads {extension}, which is in non_source_extensions")
+        if scanner["parser"] == "regex":
+            errors.extend(_regex_scanner_errors(label, scanner, layers))
+    return errors
+
+
+def _regex_scanner_errors(label: str, scanner: dict, layers: set[str]) -> list[str]:
+    errors = _regex_list_errors(f"{label}.import_patterns", scanner["import_patterns"])
+    for pattern in scanner["import_patterns"]:
+        if regex_problem(pattern) is None and re.compile(pattern).groups < 1:
+            errors.append(f"{label} import pattern {pattern!r} needs one group for the imported name")
+    for layer, patterns in scanner["layer_patterns"].items():
+        if layer not in layers:
+            errors.append(f"{label}.layer_patterns names the unknown layer {layer}")
+        errors.extend(_regex_list_errors(f"{label}.layer_patterns.{layer}", patterns))
+    return errors
+
+
+def _regex_list_errors(label: str, patterns: list[str]) -> list[str]:
+    errors: list[str] = []
+    for pattern in patterns:
+        problem = regex_problem(pattern)
+        if problem:
+            errors.append(f"{label}: {pattern!r} is not a regular expression: {problem}")
+    return errors
+
+
 def _protection_errors(project: dict) -> list[str]:
     return [
         f"{path} must match scope.protected_path_patterns"
@@ -152,4 +235,6 @@ def _template_errors(project: dict) -> list[str]:
         errors.append("toolchain.language is set but the project identity is a placeholder")
     if toolchain["pin_file"] is not None:
         errors.append("toolchain.pin_file is set but the project identity is a placeholder")
+    if project["architecture"]["import_rules"]["scanners"]:
+        errors.append("import_rules.scanners is set but the project identity is a placeholder")
     return errors

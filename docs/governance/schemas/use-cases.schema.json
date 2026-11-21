@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/governance/schemas/use-cases.schema.json",
+  "title": "UseCaseCatalog",
+  "description": "The use-case catalog that architecture.use_case_catalog names. Each use case has one constraint and one constraint test. A packet that cites the use case lists that test.",
+  "type": "object",
+  "required": ["use_cases"],
+  "additionalProperties": false,
+  "properties": {
+    "use_cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "trigger", "flow", "constraint", "constraint_test"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^UC-[0-9]{2,}$" },
+          "title": { "type": "string", "minLength": 1 },
+          "trigger": { "type": "string", "minLength": 1 },
+          "flow": { "type": "string", "minLength": 1 },
+          "constraint": { "type": "string", "minLength": 1 },
+          "constraint_test": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*$"
+          }
+        }
+      }
+    }
+  }
+}

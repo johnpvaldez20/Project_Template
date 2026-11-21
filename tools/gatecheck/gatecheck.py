@@ -10,6 +10,7 @@ file. It does not name a product or a product language. It also checks the archi
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
@@ -39,6 +40,11 @@ GATE_FILES = {
 }
 
 PROJECT_SCHEMA = "project.schema.json"
+ARCHITECTURE_REF = "project.schema.json#/properties/architecture"
+CATALOG_SCHEMAS = {
+    "use_case_catalog": "use-cases.schema.json",
+    "state_machines": "state-machines.schema.json",
+}
 
 
 paths_overlap = payloadrules.paths_overlap
@@ -393,9 +399,64 @@ def run(root: Path) -> Report:
     if project is None:
         return report
     _check_examples(schemas, root, project, report)
+    _check_catalog(schemas, root, project["architecture"], report)
     _check_packets(schemas, root, project, report)
     _check_tree(root, project, report)
     return report
+
+
+def run_architecture(root: Path) -> Report:
+    """Run the architecture checks only: catalog, packets, and import direction."""
+    report = Report()
+    schemas = _load_schemas(root, Report())
+    if schemas is None:
+        report.fail(f"no schemas found in {SCHEMAS_DIR}")
+        return report
+    project = _load_project(root, schemas, report)
+    if project is None:
+        return report
+    _check_catalog(schemas, root, project["architecture"], report)
+    _check_packets(schemas, root, project, report)
+    _check_imports(root, repofiles.list_files(root), project, report)
+    return report
+
+
+def _check_catalog(
+    schemas: schema_validate.SchemaSet, root: Path, arch: dict, report: Report
+) -> None:
+    """Check the use cases and the state machines of one architecture block."""
+    errors: list[str] = []
+    for key, schema_name in CATALOG_SCHEMAS.items():
+        errors.extend(_catalog_file_errors(schemas, root, arch.get(key), schema_name))
+    if not errors:
+        _use_cases, _machines, errors = architecture.load_catalog(root, arch)
+    report.record(
+        errors,
+        f"{arch.get('use_case_catalog')} and {arch.get('state_machines')} are correct catalogs",
+    )
+
+
+def _catalog_file_errors(
+    schemas: schema_validate.SchemaSet, root: Path, relative: Any, schema_name: str
+) -> list[str]:
+    if not isinstance(relative, str) or not (root / relative).is_file():
+        return [f"missing architecture catalog {relative}"]
+    if schema_name not in schemas.documents:
+        return [f"missing {SCHEMAS_DIR}/{schema_name}"]
+    try:
+        document = _load_json(root / relative)
+    except json.JSONDecodeError as exc:
+        return [f"{relative}: invalid JSON: {exc}"]
+    _ok, found = schemas.validate_document(schema_name, document)
+    return [f"{relative}: {item}" for item in found]
+
+
+def _check_imports(root: Path, files: list[str], project: dict, report: Report) -> None:
+    errors, scanned = architecture.import_errors(root, files, project)
+    report.record(
+        errors,
+        f"layer imports follow architecture.import_rules ({scanned} source files)",
+    )
 
 
 def _load_project(
@@ -430,9 +491,6 @@ def example_project(root: Path, project: dict, report: Report) -> dict | None:
     except json.JSONDecodeError as exc:
         report.fail(f"{EXAMPLE_ARCHITECTURE}: invalid JSON: {exc}")
         return None
-    if not isinstance(block, dict):
-        report.fail(f"{EXAMPLE_ARCHITECTURE} must be an object")
-        return None
     example = dict(project)
     example["architecture"] = block
     return example
@@ -444,6 +502,11 @@ def _check_examples(
     example = example_project(root, project, report)
     if example is None:
         return
+    shape = schemas.validate_ref(ARCHITECTURE_REF, example["architecture"])
+    if shape:
+        report.record([f"{EXAMPLE_ARCHITECTURE}: {item}" for item in shape], "")
+        return
+    _check_catalog(schemas, root, example["architecture"], report)
     for relative in (VALID_DIR, INVALID_DIR):
         rows = _load_json_dir(root, root / relative, report)
         if not rows:
@@ -511,6 +574,7 @@ def _check_tree(root: Path, project: dict, report: Report) -> None:
         treecheck.neutrality_errors(root, files),
         "template paths do not name a product stack",
     )
+    _check_imports(root, files, project, report)
 
 
 def _check_spdx(root: Path, files: list[str], project: dict, report: Report) -> None:
@@ -522,13 +586,29 @@ def default_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="gatecheck.py",
+        description="Check packets, gate payloads, and the repository shape.",
+    )
+    parser.add_argument("root", nargs="?", help="repository root. The default is this repository.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--spdx-only", action="store_true", help="check the SPDX headers only")
+    mode.add_argument(
+        "--architecture",
+        action="store_true",
+        help="check the catalog, the packets, and the import direction only",
+    )
+    return parser
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
-    spdx_only = "--spdx-only" in args
-    args = [arg for arg in args if arg != "--spdx-only"]
-    root = Path(args[0]) if args else default_root()
-    if spdx_only:
+    args = _parser().parse_args(argv)
+    root = Path(args.root) if args.root else default_root()
+    if args.spdx_only:
         report = _spdx_only(root)
+    elif args.architecture:
+        report = run_architecture(root)
     else:
         report = run(root)
     sys.stdout.write(str(report))
