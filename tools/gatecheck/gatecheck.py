@@ -662,10 +662,19 @@ def _check_tree(root: Path, project: dict, report: Report) -> None:
         report.record(ruleset, f"{treecheck.RULESET_PATH} matches the branch rules of the contract")
     _check_spdx(root, files, project, report)
     report.record(
-        treecheck.neutrality_errors(root, files),
+        treecheck.neutrality_errors(root, files, projectfile.is_template(project)),
         "template paths do not name a product stack",
     )
     _check_imports(root, files, project, report)
+    constructs = project["policy"]["forbidden_constructs"]
+    report.record(
+        treecheck.construct_errors(root, files, project),
+        f"the tree has no forbidden construct ({len(constructs)} in the project file)",
+    )
+    report.record(
+        treecheck.secret_errors(root, files),
+        "the tree has no environment file and no text with the shape of a secret",
+    )
 
 
 def _check_spdx(root: Path, files: list[str], project: dict, report: Report) -> None:

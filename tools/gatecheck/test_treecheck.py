@@ -206,5 +206,135 @@ class RulesetTest(repo_fixture.RepoCopyCase):
         self.assert_clean()
 
 
+MARKDOWN_HEADER = "<!--\nSPDX-FileCopyrightText: YEAR COPYRIGHT-HOLDER\nSPDX-License-Identifier: LicenseRef-UNSET\n-->\n\n"
+CONSTRUCT = {
+    "id": "NO_WAIT_CALL",
+    "pattern": r"\bwait\(",
+    "paths": ["src/domain/", "src/application/"],
+    "extensions": [".md"],
+    "reason": "A wait call in a rule makes a test slow.",
+}
+
+
+class ForbiddenConstructTest(repo_fixture.AdoptedRepoCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.edit(lambda project: project["policy"]["forbidden_constructs"].append(dict(CONSTRUCT)))
+
+    def note(self, relative: str, body: str) -> None:
+        repo_fixture.write_text(self.root, relative, MARKDOWN_HEADER + body)
+
+    def test_tree_without_the_construct_passes(self):
+        self.note("src/domain/notes.md", "The rule does not stop.\n")
+        self.assert_clean()
+
+    def test_construct_in_a_listed_path_fails(self):
+        self.note("src/domain/notes.md", "first line\nresult = wait(5)\n")
+        self.assert_fails_with(
+            "src/domain/notes.md:7: forbidden construct NO_WAIT_CALL. A wait call in a rule makes a test slow."
+        )
+
+    def test_construct_outside_the_listed_paths_passes(self):
+        self.note("src/infrastructure/notes.md", "result = wait(5)\n")
+        self.assert_clean()
+
+    def test_construct_in_another_file_type_passes(self):
+        self.edit(
+            lambda project: project["architecture"]["import_rules"]["non_source_extensions"].append(".txt")
+        )
+        repo_fixture.write_text(self.root, "src/domain/notes.txt", "result = wait(5)\n")
+        self.assert_clean()
+
+    def test_construct_ids_must_be_unique(self):
+        self.edit(lambda project: project["policy"]["forbidden_constructs"].append(dict(CONSTRUCT)))
+        self.assert_fails_with("policy.forbidden_constructs has the id NO_WAIT_CALL twice")
+
+    def test_construct_pattern_must_compile(self):
+        self.edit(lambda project: project["policy"]["forbidden_constructs"][0].update(pattern="("))
+        self.assert_fails_with("policy.forbidden_constructs.NO_WAIT_CALL: '(' is not a regular expression")
+
+    def test_construct_needs_a_reason(self):
+        self.edit(lambda project: project["policy"]["forbidden_constructs"][0].pop("reason"))
+        self.assert_fails_with("missing required property reason")
+
+
+class TemplateNeutralTest(repo_fixture.RepoCopyCase):
+    def test_template_must_not_set_a_forbidden_construct(self):
+        repo_fixture.edit_json(
+            self.root,
+            ".governance/project.json",
+            lambda project: project["policy"]["forbidden_constructs"].append(dict(CONSTRUCT)),
+        )
+        self.assert_fails_with("policy.forbidden_constructs is set but the project identity is a placeholder")
+
+    def test_template_workflow_must_not_name_a_build_tool(self):
+        self._add_tool_step()
+        self.assert_fails_with(".github/workflows/ci.yml contains non-neutral text")
+
+    def test_governance_page_must_not_name_a_build_tool(self):
+        path = self.root / "docs/governance/README.md"
+        path.write_text(path.read_text(encoding="utf-8") + "\nRun " + "car" + "go test.\n", encoding="utf-8")
+        self.assert_fails_with("docs/governance/README.md contains non-neutral text")
+
+    def _add_tool_step(self) -> None:
+        path = self.root / CI
+        step = "\n      - name: product\n        run: " + "car" + "go --version\n"
+        path.write_text(path.read_text(encoding="utf-8") + step, encoding="utf-8")
+
+
+class ProjectWorkflowTest(repo_fixture.AdoptedRepoCase):
+    def test_project_workflow_can_name_its_build_tool(self):
+        path = self.root / CI
+        step = "\n      - name: product\n        run: " + "car" + "go --version\n"
+        path.write_text(path.read_text(encoding="utf-8") + step, encoding="utf-8")
+        self.assert_clean()
+
+
+class SecretTest(repo_fixture.RepoCopyCase):
+    def test_environment_file_fails(self):
+        repo_fixture.write_text(self.root, ".env", "TOKEN=value\n")
+        self.assert_fails_with(".env: an environment file must not be in the repository")
+
+    def test_environment_file_in_a_directory_fails(self):
+        repo_fixture.write_text(self.root, "src/.env.production", "TOKEN=value\n")
+        self.assert_fails_with("src/.env.production: an environment file must not be in the repository")
+
+    def test_example_environment_file_passes(self):
+        repo_fixture.edit_json(
+            self.root,
+            ".governance/project.json",
+            lambda project: project["scope"]["allowed_top_level"].append(".env.example"),
+        )
+        repo_fixture.write_text(self.root, ".env.example", "TOKEN=\n")
+        self.assert_clean()
+
+    def test_private_key_block_fails(self):
+        self._leak("-" * 5 + "BEGIN OPENSSH PRIVATE KEY" + "-" * 5)
+        self.assert_fails_with("docs/design/notes.txt:2: the text has the shape of a secret (private key)")
+
+    def test_cloud_access_key_id_fails(self):
+        self._leak("key = " + "AKIA" + "ABCDEFGHIJKLMNOP")
+        self.assert_fails_with("the text has the shape of a secret (cloud access key id)")
+
+    def test_host_access_token_fails(self):
+        self._leak("token: " + "ghp_" + "a1B2" * 9)
+        self.assert_fails_with("the text has the shape of a secret (host access token)")
+
+    def test_host_fine_grained_token_fails(self):
+        self._leak("github" + "_pat_" + "a1B2_" * 12)
+        self.assert_fails_with("the text has the shape of a secret (host fine-grained token)")
+
+    def test_chat_service_token_fails(self):
+        self._leak("xox" + "b-" + "1234567890-abcdefghij")
+        self.assert_fails_with("the text has the shape of a secret (chat service token)")
+
+    def test_normal_text_passes(self):
+        self._leak("The token is in the environment variable API_TOKEN.")
+        self.assert_clean()
+
+    def _leak(self, line: str) -> None:
+        repo_fixture.write_text(self.root, "docs/design/notes.txt", "notes\n" + line + "\n")
+
+
 if __name__ == "__main__":
     unittest.main()

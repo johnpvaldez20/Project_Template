@@ -59,6 +59,7 @@ def semantic_errors(project: dict) -> list[str]:
         _ci_errors(project)
         + _layer_errors(project)
         + _import_rule_errors(project)
+        + _construct_errors(project)
         + _protection_errors(project)
         + _identity_errors(project)
     )
@@ -210,6 +211,18 @@ def _regex_list_errors(label: str, patterns: list[str]) -> list[str]:
     return errors
 
 
+def _construct_errors(project: dict) -> list[str]:
+    errors: list[str] = []
+    seen: set[str] = set()
+    for construct in project["policy"]["forbidden_constructs"]:
+        name = construct["id"]
+        if name in seen:
+            errors.append(f"policy.forbidden_constructs has the id {name} twice")
+        seen.add(name)
+        errors.extend(_regex_list_errors(f"policy.forbidden_constructs.{name}", [construct["pattern"]]))
+    return errors
+
+
 def _protection_errors(project: dict) -> list[str]:
     return [
         f"{path} must match scope.protected_path_patterns"
@@ -242,4 +255,6 @@ def _template_errors(project: dict) -> list[str]:
         errors.append("import_rules.scanners is set but the project identity is a placeholder")
     if any(value is not None for value in project["ci"]["evidence"].values()):
         errors.append("ci.evidence is set but the project identity is a placeholder")
+    if project["policy"]["forbidden_constructs"]:
+        errors.append("policy.forbidden_constructs is set but the project identity is a placeholder")
     return errors

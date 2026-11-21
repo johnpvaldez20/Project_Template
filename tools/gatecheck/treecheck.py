@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 TEMPLATE_DIRS = ("docs/governance", ".github", "tools/gatecheck")
 WORKFLOWS_DIR = ".github/workflows/"
@@ -25,6 +25,7 @@ REQUIRED_RULES = (
     "pull_request",
     "required_status_checks",
 )
+ENV_EXAMPLE_SUFFIXES = (".example", ".sample", ".template")
 REVIEW_FLAGS = (
     "dismiss_stale_reviews_on_push",
     "require_code_owner_review",
@@ -279,11 +280,18 @@ def spdx_errors(root: Path, files: list[str], project: dict) -> tuple[list[str],
     return errors, checked
 
 
-def neutrality_errors(root: Path, files: list[str]) -> list[str]:
+def neutrality_errors(root: Path, files: list[str], template: bool) -> list[str]:
+    """Template paths must not name a product stack.
+
+    A project names its build tool in its workflows. The workflows are
+    checked only while the project identity is the template placeholder.
+    """
     errors: list[str] = []
     patterns = _banned_patterns()
     for relative in files:
         if not any(under(relative, directory) for directory in TEMPLATE_DIRS):
+            continue
+        if relative.startswith(WORKFLOWS_DIR) and not template:
             continue
         text = _read_text(root / relative)
         for pattern in patterns:
@@ -291,6 +299,56 @@ def neutrality_errors(root: Path, files: list[str]) -> list[str]:
             if match:
                 errors.append(f"{relative} contains non-neutral text {match.group(0)!r}")
                 break
+    return errors
+
+
+def construct_errors(root: Path, files: list[str], project: dict) -> list[str]:
+    """Find each forbidden construct of the project file in the tree."""
+    errors: list[str] = []
+    for construct in project["policy"]["forbidden_constructs"]:
+        pattern = re.compile(construct["pattern"])
+        suffixes = {item.lower() for item in construct.get("extensions", [])}
+        for relative in files:
+            if not any(under(relative, prefix) for prefix in construct["paths"]):
+                continue
+            if suffixes and PurePosixPath(relative).suffix.lower() not in suffixes:
+                continue
+            for number, line in enumerate(_read_text(root / relative).splitlines(), start=1):
+                if pattern.search(line):
+                    errors.append(
+                        f"{relative}:{number}: forbidden construct {construct['id']}. "
+                        f"{construct['reason']}"
+                    )
+    return errors
+
+
+def _secret_patterns() -> tuple[tuple[str, re.Pattern[str]], ...]:
+    """Build the patterns so that this file does not contain a match."""
+    dashes = "-" * 5
+    return (
+        ("private key", re.compile(dashes + "BEGIN [A-Z ]*PRIVATE KEY" + dashes)),
+        ("cloud access key id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+        ("host access token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
+        ("host fine-grained token", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{50,}\b")),
+        ("chat service token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b")),
+    )
+
+
+def secret_errors(root: Path, files: list[str]) -> list[str]:
+    """Find an environment file and text that has the shape of a secret."""
+    errors: list[str] = []
+    patterns = _secret_patterns()
+    for relative in files:
+        name = PurePosixPath(relative).name
+        if (name == ".env" or name.startswith(".env.")) and not name.endswith(ENV_EXAMPLE_SUFFIXES):
+            errors.append(f"{relative}: an environment file must not be in the repository")
+            continue
+        text = _read_text(root / relative)
+        for label, pattern in patterns:
+            match = pattern.search(text)
+            if match:
+                line = text.count("\n", 0, match.start()) + 1
+                errors.append(f"{relative}:{line}: the text has the shape of a secret ({label})")
     return errors
 
 

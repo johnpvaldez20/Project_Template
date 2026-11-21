@@ -193,7 +193,11 @@
       "properties": {
         "max_cyclomatic_complexity": { "type": "integer", "minimum": 1 },
         "coverage_floor_percent": { "type": "number", "minimum": 0, "maximum": 100 },
-        "forbidden_constructs": { "type": "array" }
+        "forbidden_constructs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/forbidden_construct" },
+          "description": "Text that the project forbids. The gate checker reads each file under the paths and fails on a match."
+        }
       }
     },
     "gatekeeper": {
@@ -315,6 +319,33 @@
     },
     "check_name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$" },
     "layer_name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "forbidden_construct": {
+      "type": "object",
+      "required": ["id", "pattern", "paths", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+        "pattern": {
+          "$ref": "#/$defs/regex",
+          "description": "The checker applies the pattern to one line at a time."
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/scope_path" },
+          "description": "Where the construct is forbidden. An entry that ends with / is a directory."
+        },
+        "extensions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/extension" },
+          "description": "Optional. Limit the check to these file suffixes."
+        },
+        "reason": { "type": "string", "minLength": 10 }
+      }
+    },
     "scanner": {
       "type": "object",
       "required": ["parser", "extensions"],
