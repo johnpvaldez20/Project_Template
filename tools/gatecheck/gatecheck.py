@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import architecture
+import handoff
 import payloadrules
 import projectfile
 import repofiles
@@ -244,6 +245,56 @@ def payload_errors(
         return ["missing or unknown gate"]
     _ok, errors = schemas.validate_document(schema_name, payload)
     return list(errors) + payload_extra_errors(payload, project, root)
+
+
+def check_payload_files(
+    root: Path, names: list[str], stdin_text: str | None = None
+) -> Report:
+    """Check handoff payloads that are in files. The name - reads standard input."""
+    report = Report()
+    try:
+        schemas, project = load_context(root)
+    except ValueError:
+        report.fail(
+            "the schemas or the project file are not correct. "
+            "Run the gate checker with no option."
+        )
+        return report
+    checked: list[dict] = []
+    for name in names:
+        for label, payload in _read_payload_file(name, stdin_text, report):
+            packet = handoff.load_packet(root, payload.get("packet_id"))
+            errors = payload_errors(schemas, payload, project, root)
+            errors.extend(handoff.packet_errors(payload, packet))
+            note = "" if packet is not None else ". No packet file exists to compare."
+            report.record(
+                [f"{label}: {item}" for item in errors],
+                f"{label} is a correct {payload.get('gate')} payload "
+                f"for {payload.get('packet_id')}{note}",
+            )
+            checked.append(payload)
+    if len(checked) > 1:
+        report.record(handoff.chain_errors(checked), "the payloads of each packet agree")
+    return report
+
+
+def _read_payload_file(
+    name: str, stdin_text: str | None, report: Report
+) -> list[tuple[str, dict]]:
+    try:
+        if name == "-":
+            text = sys.stdin.read() if stdin_text is None else stdin_text
+        else:
+            text = Path(name).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        report.fail(f"{name}: cannot read the file: {exc}")
+        return []
+    payloads, errors = handoff.read_payloads(text)
+    for item in errors:
+        report.fail(f"{name}: {item}")
+    if len(payloads) == 1:
+        return [(name, payloads[0])]
+    return [(f"{name} block {index}", payload) for index, payload in enumerate(payloads, start=1)]
 
 
 def _check_payload(
@@ -599,6 +650,13 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="check the catalog, the packets, and the import direction only",
     )
+    mode.add_argument(
+        "--payload",
+        nargs="+",
+        metavar="FILE",
+        help="check gate payloads in files. A file holds JSON, or text with "
+        "json gate-payload blocks. The name - reads standard input.",
+    )
     return parser
 
 
@@ -609,6 +667,8 @@ def main(argv: list[str] | None = None) -> int:
         report = _spdx_only(root)
     elif args.architecture:
         report = run_architecture(root)
+    elif args.payload:
+        report = check_payload_files(root, args.payload)
     else:
         report = run(root)
     sys.stdout.write(str(report))
