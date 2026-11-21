@@ -301,8 +301,10 @@ Both runs are CI URLs.
 The red run and the green run are two runs on two commits.
 `green_run.head_sha` equals `github.head_sha` on `MERGE_APPROVED`.
 A test that passes on both commits is `REGRESSION_TEST_NOT_RED`.
-A packet with no behavior sets `regression_test.required` false at Gate 1.
-Do not discover that fact at Gate 3.
+A READY packet has `regression_required` true.
+Its plan names one or more regression tests.
+A Gate 3 approval for that packet sets `regression_test.required` true.
+The `--payload` check compares the Gate 3 payload with the packet file.
 
 Tests use fixed seeds, committed fixtures, and a temp directory per test.
 Tests do not use the wall clock.
