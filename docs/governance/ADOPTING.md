@@ -90,6 +90,7 @@ A change to the workflow or to the project file is a gatekeeper packet.
 7. Add the report directory to `.gitignore`.
 8. Run the tests with the network off. Use the means of your stack or of your CI host.
 9. Add each skip marker of your test tool to `policy.forbidden_constructs`.
+10. Add a lint check that fails above `policy.max_cyclomatic_complexity` when your stack has one.
 
 The evidence check fails on a failed test and on an ignored test.
 It fails when the coverage is below `policy.coverage_floor_percent`.

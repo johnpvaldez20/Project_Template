@@ -25,7 +25,7 @@ Make this decision first.
 | Choice | Result |
 |---|---|
 | Two accounts. The workers push and open pull requests with one account. The gatekeeper reviews and merges with the owner account. | The host enforces Gate 3. Use the ruleset file as it is. |
-| One account for each job. | The owner account cannot approve its own pull request. The ruleset blocks each merge. Add the bypass in section 4. The host then does not enforce Gate 3. |
+| One account. That account does the work, the review, and the merge. | The account cannot approve its own pull request. The ruleset blocks each merge. Add the bypass in section 4. The host then does not enforce Gate 3. |
 
 The second account can be a machine user or an application.
 Give it write access only. Do not make it an administrator.
@@ -74,7 +74,7 @@ gh api repos/OWNER/REPO/rules/branches/main
 
 The answer must list `pull_request`, `required_status_checks`, `non_fast_forward`, `deletion`, and `required_linear_history`.
 
-## 4. Add a bypass only when one account does each job
+## 4. Add a bypass only when one account does all the jobs
 
 Do this section only for the second choice in section 1.
 
